@@ -115,7 +115,7 @@ void Viewer::drawPoints() {
   glPointSize(10.0f);
   glBegin(GL_POINTS);
 
-  for (auto i = 0; i < points.size(0); i++) {
+  for (auto i = 0; i < points.size(0); i+=3) {
 
     glColor4ub(*(rgb_data + i), *(rgb_data + i + 1), *(rgb_data + i + 2), 255);
     glVertex3f(*(xyz_data + i), *(xyz_data + i + 1), *(xyz_data + 2 + i));
