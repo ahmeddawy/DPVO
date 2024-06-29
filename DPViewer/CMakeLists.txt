@@ -7,9 +7,8 @@ add_definitions(-D_GLIBCXX_USE_CXX11_ABI=0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-set(CMAKE_CUDA_FLAGS "${CMAKE_CXX_FLAGS}")
-
+# Set the CUDA architecture flags to a compatible version supported by your CUDA toolkit
+set(CMAKE_CUDA_ARCHITECTURES 89)  # Adjust this according to your CUDA toolkit compatibility
 
 include(FindCUDA/select_compute_arch)
 CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
@@ -17,7 +16,6 @@ string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
 string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
 string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
 SET(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
-
 
 list(APPEND CMAKE_PREFIX_PATH ${TORCH_PATH})
 
@@ -31,5 +29,3 @@ include_directories(
 
 add_subdirectory(pybind11)
 add_subdirectory(dpviewer)
-
-

@@ -2,6 +2,8 @@ import os
 import cv2
 import numpy as np
 from multiprocessing import Process, Queue
+from pathlib import Path
+from itertools import chain
 
 def image_stream(queue, imagedir, calib, stride, skip=0):
     """ image generator """
@@ -15,10 +17,11 @@ def image_stream(queue, imagedir, calib, stride, skip=0):
     K[1,1] = fy
     K[1,2] = cy
 
-    image_list = sorted(os.listdir(imagedir))[skip::stride]
+    img_exts = ["*.png", "*.jpeg", "*.jpg"]
+    image_list = sorted(chain.from_iterable(Path(imagedir).glob(e) for e in img_exts))[skip::stride]
 
     for t, imfile in enumerate(image_list):
-        image = cv2.imread(os.path.join(imagedir, imfile))
+        image = cv2.imread(str(imfile))
         if len(calib) > 4:
             image = cv2.undistort(image, K, calib[4:])
 
