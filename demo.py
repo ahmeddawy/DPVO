@@ -32,12 +32,16 @@ def run(cfg, network, imagedir, calib, stride=1, skip=0, viz=False, timeit=False
     reader.start()
 
     while 1:
+        # t in the inference frame index or let's say it is the inference index 
         (t, image, intrinsics) = queue.get()
         if t < 0: break
-
+        
+        # the raw input image is resized to its 0.5
         image = torch.from_numpy(image).permute(2,0,1).cuda()
-        intrinsics = torch.from_numpy(intrinsics).cuda()
 
+        # the intrinsics shape in 4, intrinsics = np.array([fx*.5, fy*.5, cx*.5, cy*.5])
+        intrinsics = torch.from_numpy(intrinsics).cuda()
+        
         if slam is None:
             slam = DPVO(cfg, network, ht=image.shape[1], wd=image.shape[2], viz=viz)
 
