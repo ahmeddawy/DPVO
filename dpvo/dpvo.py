@@ -24,9 +24,8 @@ class DPVO:
         self.enable_timing = False
 
         self.n = 0  # number of frames in the graph, it holds the frame index as the slam is running
-        self.m = 0  # number of patches
-        print("PATCHES_PER_FRAME ", self.cfg.PATCHES_PER_FRAME)
-        print("BUFFER_SIZE ", self.cfg.BUFFER_SIZE)
+        self.m = 0  # number of patches in the graph
+
 
         self.M = self.cfg.PATCHES_PER_FRAME  # the deafult config is 96 patch per frame
         self.N = self.cfg.BUFFER_SIZE  # the buffer size is 2048
@@ -103,7 +102,7 @@ class DPVO:
         # Internsics map Size([32, 96, 384])
         self.imap_ = torch.zeros(self.mem, self.M, DIM, **kwargs) 
         
-        # Gradient map Size([32, 96, 128, 3, 3])
+        # feature map Size([32, 96, 128, 3, 3])
         self.gmap_ = torch.zeros(self.mem, self.M, 128, self.P, self.P,
                                  **kwargs)
         print("self.imap_ ",self.imap_.shape)
@@ -360,9 +359,12 @@ class DPVO:
                             indexing='ij')
 
     def __edges_forw(self):
+        # the configured lifetime of patches, which determines how many frames a patch should be tracked.
         r = self.cfg.PATCH_LIFETIME
-        t0 = self.M * max((self.n - r), 0)
-        t1 = self.M * max((self.n - 1), 0)
+        
+        #These variables define the range of temporal indices for patches
+        t0 = self.M * max((self.n - r), 0) # This is the start index based on the current frame self.n, patch lifetime r, and a multiplier (number of patches per frame).
+        t1 = self.M * max((self.n - 1), 0) # This is the end index for the forward edges.
         return flatmeshgrid(torch.arange(t0, t1, device="cuda"),
                             torch.arange(self.n - 1, self.n, device="cuda"),
                             indexing='ij')
@@ -422,12 +424,15 @@ class DPVO:
                 self.poses_[self.n] = tvec_qvec
 
         # TODO better depth initialization
-        patches[:, :, 2] = torch.rand_like(patches[:, :, 2, 0, 0, None, None])
+        patches[:, :, 2] = torch.rand_like(patches[:, :, 2, 0, 0, None, None]) #Size([1, 96, 3, 3, 3])
+
         if self.is_initialized:
             s = torch.median(self.patches_[self.n - 3:self.n, :, 2])
             patches[:, :, 2] = s
-
         self.patches_[self.n] = patches
+        
+        # The memorey of the system is set in self.mem = 32
+        # Thus these tensors will hold the values for the last 32 frame
 
         ### update network attributes ###
         self.imap_[self.n % self.mem] = imap.squeeze()
@@ -441,8 +446,8 @@ class DPVO:
                 self.delta[self.counter - 1] = (self.counter - 2, Id[0])
                 return
 
-        self.n += 1
-        self.m += self.M
+        self.n += 1 # increase the number of frames in the graph by 1
+        self.m += self.M  # increase the number of patches in the graph by 96
 
         # relative pose
         self.append_factors(*self.__edges_forw())
