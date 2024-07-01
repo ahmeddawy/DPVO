@@ -36,7 +36,7 @@ def run(cfg, network, imagedir, calib, stride=1, skip=0, viz=False, timeit=False
         (t, image, intrinsics) = queue.get()
         if t < 0: break
         
-        # the raw input image is resized to its 0.5
+        # the raw input image is resized to its 0.5 scale in video_stream
         image = torch.from_numpy(image).permute(2,0,1).cuda()
 
         # the intrinsics shape in 4, intrinsics = np.array([fx*.5, fy*.5, cx*.5, cy*.5])
@@ -49,7 +49,7 @@ def run(cfg, network, imagedir, calib, stride=1, skip=0, viz=False, timeit=False
         intrinsics = intrinsics.cuda()
 
         with Timer("SLAM", enabled=timeit):
-            slam(t, image, intrinsics)
+            slam(t, image, intrinsics) # calling  __call__
 
     for _ in range(12):
         slam.update()

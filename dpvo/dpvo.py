@@ -23,7 +23,7 @@ class DPVO:
         self.is_initialized = False
         self.enable_timing = False
 
-        self.n = 0  # number of frames
+        self.n = 0  # number of frames in the graph, it holds the frame index as the slam is running
         self.m = 0  # number of patches
         print("PATCHES_PER_FRAME ", self.cfg.PATCHES_PER_FRAME)
         print("BUFFER_SIZE ", self.cfg.BUFFER_SIZE)
@@ -34,8 +34,8 @@ class DPVO:
         self.ht = ht  # image height
         self.wd = wd  # image width
 
-        DIM = self.DIM  # 384
-        RES = self.RES  # 4
+        DIM = self.DIM  # 384 ->  comes from VONet()
+        RES = self.RES  # 4   ->  comes from VONet()
 
         ### state attributes ###
         self.tlist = []
@@ -53,6 +53,7 @@ class DPVO:
         # torch.Size([2048,7]), BUFFER_SIZE x 7
         self.poses_ = torch.zeros(self.N, 7, dtype=torch.float, device="cuda")
 
+        # self.P is the patch size = 3
         # torch.Size([2048, 96, 3, 3, 3]), BUFFER_SIZE x PATCHES_PER_FRAME x 3 x 3 x 3
         self.patches_ = torch.zeros(self.N,
                                     self.M,
@@ -99,13 +100,19 @@ class DPVO:
         else:
             self.kwargs = kwargs = {"device": "cuda", "dtype": torch.float}
         
-        self.imap_ = torch.zeros(self.mem, self.M, DIM, **kwargs)
+        # Internsics map Size([32, 96, 384])
+        self.imap_ = torch.zeros(self.mem, self.M, DIM, **kwargs) 
+        
+        # Gradient map Size([32, 96, 128, 3, 3])
         self.gmap_ = torch.zeros(self.mem, self.M, 128, self.P, self.P,
                                  **kwargs)
+        print("self.imap_ ",self.imap_.shape)
+        print("self.gmap_ ",self.gmap_.shape)
 
         ht = ht // RES
         wd = wd // RES
-
+        
+        # fmap1_ Size([1, 32, 128, 132, 240]) , Size([1, 32, 128, 33, 60])
         self.fmap1_ = torch.zeros(1, self.mem, 128, ht // 1, wd // 1, **kwargs)
         self.fmap2_ = torch.zeros(1, self.mem, 128, ht // 4, wd // 4, **kwargs)
 
@@ -119,7 +126,7 @@ class DPVO:
 
         # initialize poses to identity matrix
         self.poses_[:, 6] = 1.0
-
+       
         # store relative poses for removed frames
         self.delta = {}
 
@@ -376,10 +383,14 @@ class DPVO:
         if self.viewer is not None:
             self.viewer.update_image(image)
             self.viewer.loop()
-
+        # Batch the first two dimensions of the image tensor to be [1,1,3,h,w], then Normalize to the range [-0.5, 0.5]
         image = 2 * (image[None, None] / 255.0) - 0.5
 
         with autocast(enabled=self.cfg.MIXED_PRECISION):
+            # 1- feature map Size(1, 1, 128, 132, 240)
+            # 2- corresponding patches of the feature map Size([1, 96, 128, 3, 3])
+            # 3- corresponding patches of the intrensics map Size([1, 96, 384, 1, 1])
+            # 4- patches of the image centered around coords with added disparity Size([1, 96, 3, 3, 3])
             fmap, gmap, imap, patches, _, clr = \
                 self.network.patchify(image,
                     patches_per_image=self.cfg.PATCHES_PER_FRAME,

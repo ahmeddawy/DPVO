@@ -109,12 +109,11 @@ class Patchifier(nn.Module):
 
     def forward(self, images, patches_per_image=80, disps=None, gradient_bias=False, return_color=False):
         """ extract patches from input images """
-        fmap = self.fnet(images) / 4.0
-        imap = self.inet(images) / 4.0
+        fmap = self.fnet(images) / 4.0 # size(1, 1, 128, 132, 240)
+        imap = self.inet(images) / 4.0 # size(1, 1, 128, 132, 240)
 
         b, n, c, h, w = fmap.shape
         P = self.patch_size
-
         # bias patch selection towards regions with high gradient
         if gradient_bias:
             g = self.__image_gradient(images)
@@ -129,12 +128,22 @@ class Patchifier(nn.Module):
             y = torch.gather(y, 1, ix[:, -patches_per_image:])
 
         else:
+
             x = torch.randint(1, w-1, size=[n, patches_per_image], device="cuda")
             y = torch.randint(1, h-1, size=[n, patches_per_image], device="cuda")
+
+        # we have the center coordinates (x,y) of the patches 
+        coords = torch.stack([x, y], dim=-1).float() # size (1,96,2)
         
-        coords = torch.stack([x, y], dim=-1).float()
-        imap = altcorr.patchify(imap[0], coords, 0).view(b, -1, DIM, 1, 1)
-        gmap = altcorr.patchify(fmap[0], coords, P//2).view(b, -1, 128, P, P)
+        # Extract the corresponding patches from the intrensics map and the feature map
+        
+        # Extract the corresponding patches from the intrensics map centered around each coordinate in coords with radious 0,
+        # The extracted patches are then reshaped to have the shape [b, -1, 384, 1, 1],
+        imap = altcorr.patchify(imap[0], coords, 0).view(b, -1, DIM, 1, 1)    # Size([1, 96, 384, 1, 1])
+        
+        # Extract the corresponding patches from the features map centered around each coordinate in coords with radious 1,
+        # The extracted patches are then reshaped to have the shape [b, -1, 128, 3, 3],
+        gmap = altcorr.patchify(fmap[0], coords, P//2).view(b, -1, 128, P, P) # Size([1, 96, 128, 3, 3])
 
         if return_color:
             clr = altcorr.patchify(images[0], 4*(coords + 0.5), 0).view(b, -1, 3)
@@ -142,14 +151,30 @@ class Patchifier(nn.Module):
         if disps is None:
             disps = torch.ones(b, n, h, w, device="cuda")
 
-        grid, _ = coords_grid_with_index(disps, device=fmap.device)
-        patches = altcorr.patchify(grid[0], coords, P//2).view(b, -1, 3, P, P)
+        grid, _ = coords_grid_with_index(disps, device=fmap.device) # Size([1, 1, 3, 132, 240]) this grid is (x,y,d) for each pixel of the disparity
 
+        
+        
+        # Extracting patches of size P x P centered around each coordinate in coords from the grid tensor,
+        #  The extracted patches are then reshaped to have the shape [b, -1, 3, P, P],
+        #  where b is the batch size,
+        #  -1 represents the number of patches,
+        #  3 is the number of channels (x, y, disparity),
+        #  and P x P is the patch size.
+        patches = altcorr.patchify(grid[0], coords, P//2).view(b, -1, 3, P, P) # Size([1, 96, 3, 3, 3]) , 
+        
+        
         index = torch.arange(n, device="cuda").view(n, 1)
         index = index.repeat(1, patches_per_image).reshape(-1)
 
         if return_color:
             return fmap, gmap, imap, patches, index, clr
+        
+        # return 
+        # 1- feature map Size(1, 1, 128, 132, 240)
+        # 2- corresponding patches of the feature map Size([1, 96, 128, 3, 3])
+        # 3- corresponding patches of the intrensics map Size([1, 96, 384, 1, 1])
+        # 4- patches of the image centered around coords with added disparity Size([1, 96, 3, 3, 3])
 
         return fmap, gmap, imap, patches, index
 
