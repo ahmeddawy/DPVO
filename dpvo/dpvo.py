@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 
+torch.set_printoptions(threshold=torch.inf)
+
 from . import fastba
 from . import altcorr
 from . import lietorch
@@ -25,7 +27,6 @@ class DPVO:
 
         self.n = 0  # number of frames in the graph, it holds the frame index as the slam is running
         self.m = 0  # number of patches in the graph
-
 
         self.M = self.cfg.PATCHES_PER_FRAME  # the deafult config is 96 patch per frame
         self.N = self.cfg.BUFFER_SIZE  # the buffer size is 2048
@@ -87,9 +88,8 @@ class DPVO:
                                   dtype=torch.long,
                                   device="cuda")
 
-        # torch.Size([2048]), BUFFER_SIZE 
+        # torch.Size([2048]), BUFFER_SIZE
         self.index_map_ = torch.zeros(self.N, dtype=torch.long, device="cuda")
-
 
         ### network attributes ###
         self.mem = 32
@@ -98,19 +98,17 @@ class DPVO:
             self.kwargs = kwargs = {"device": "cuda", "dtype": torch.half}
         else:
             self.kwargs = kwargs = {"device": "cuda", "dtype": torch.float}
-        
-        # Internsics map Size([32, 96, 384])
-        self.imap_ = torch.zeros(self.mem, self.M, DIM, **kwargs) 
-        
-        # feature map Size([32, 96, 128, 3, 3])
+
+        # Internsics map Size([32, 96, 384]) , to hold the intensics maps(384) of the patches(96) throughout the mem(32)
+        self.imap_ = torch.zeros(self.mem, self.M, DIM, **kwargs)
+
+        # feature map Size([32, 96, 128, 3, 3]), to hold the feature maps(128x3x3) of the patches(96) throughout the mem(32)
         self.gmap_ = torch.zeros(self.mem, self.M, 128, self.P, self.P,
                                  **kwargs)
-        print("self.imap_ ",self.imap_.shape)
-        print("self.gmap_ ",self.gmap_.shape)
 
         ht = ht // RES
         wd = wd // RES
-        
+
         # fmap1_ Size([1, 32, 128, 132, 240]) , Size([1, 32, 128, 33, 60])
         self.fmap1_ = torch.zeros(1, self.mem, 128, ht // 1, wd // 1, **kwargs)
         self.fmap2_ = torch.zeros(1, self.mem, 128, ht // 4, wd // 4, **kwargs)
@@ -125,13 +123,14 @@ class DPVO:
 
         # initialize poses to identity matrix
         self.poses_[:, 6] = 1.0
-       
+
         # store relative poses for removed frames
         self.delta = {}
 
         self.viewer = None
         if viz:
             self.start_viewer()
+        self.pointcloud = []
 
     def load_weights(self, network):
         # load network from checkpoint file
@@ -212,6 +211,15 @@ class DPVO:
 
         if self.viewer is not None:
             self.viewer.join()
+        # print("poses ", poses.shape)
+        # print("pointclous ", self.points_.shape)
+        # print("tstamps ", tstamps.shape)
+        # pointcloud_np = self.points_.cpu().numpy()
+
+        # # Save the NumPy array to a file
+        # np.save('./plot/point_cloud.npy', pointcloud_np)
+        # np.save('./plot/poses.npy', poses)
+        # torch.save(self.pointcloud, './plot/pointcloud_list.pt')
 
         return poses, tstamps
 
@@ -220,10 +228,20 @@ class DPVO:
         ii, jj = indicies if indicies is not None else (self.kk, self.jj)
         ii1 = ii % (self.M * self.mem)
         jj1 = jj % (self.mem)
+        '''
+        - Find the correlation of gmap[ii1] and  self.pyramid[0][jj1] around the coordinates coords wich exists in frame_jj
+        - Find the correlation of feature maps of patches[ii1] and the feature map of frame_jj1 around coords, with window size =3
+        -- coords are the projection of patches[ii1]  to frame jj1
+        '''
+        # Size [1,len(ii),7,7,3,3]
         corr1 = altcorr.corr(self.gmap, self.pyramid[0], coords / 1, ii1, jj1,
                              3)
+
+        # Size [1,len(ii),7,7,3,3]
         corr2 = altcorr.corr(self.gmap, self.pyramid[1], coords / 4, ii1, jj1,
                              3)
+
+        # return Size[1,len(ii),882]
         return torch.stack([corr1, corr2], -1).view(1, len(ii), -1)
 
     def reproject(self, indicies=None):
@@ -250,16 +268,49 @@ class DPVO:
 
     def motion_probe(self):
         """ kinda hacky way to ensure enough motion for initialization """
+        '''1- Get the global indices of the patches of frame i
+           2- Prpject these patches to frame j (which is its next frame) '''
+
+        # The patches indices of frame index i (previous frame n-1) among the indices of all patches
         kk = torch.arange(self.m - self.M, self.m, device="cuda")
+        # The current frame index
         jj = self.n * torch.ones_like(kk)
+        # The frame index of the corresponding patches
         ii = self.ix[kk]
+        '''
+        Debugging output 
+        
+        n = 1
+        kk  tensor([ 0 .. 95])
+        jj  tensor([1 .. 1])
+        ii  tensor([0 .. 0] 
+
+        n = 2
+        kk  tensor([ 96 .. 191])
+        jj  tensor([2 .. 2])
+        ii  tensor([1 .. 1] 
+        '''
 
         net = torch.zeros(1, len(ii), self.DIM, **self.kwargs)
+
+        # coords of projecting patches kk from frame ii to frame jj
         coords = self.reproject(indicies=(ii, jj, kk))
 
         with autocast(enabled=self.cfg.MIXED_PRECISION):
+            '''
+                1 - Find the correlation of feature maps of patches[kk] and the feature map of frame_jj,
+                    with window size =3,
+                    around coords, which are the projection of patches[kk] from their original frame_ii to frame_jj.
+                2 - Get the context feature maps of patches[kk]
+                
+            '''
+            # Size[1,len(ii),882]
             corr = self.corr(coords, indicies=(kk, jj))
+
+            # Get the context feature maps of patches[kk]
+            # Size[1,96,384]
             ctx = self.imap[:, kk % (self.M * self.mem)]
+
             net, (delta, weight, _) = \
                 self.network.update(net, ctx, corr, None, ii, jj, kk)
 
@@ -351,7 +402,10 @@ class DPVO:
                                       self.intrinsics, self.ix[:self.m])
             points = (points[..., 1, 1, :3] / points[..., 1, 1, 3:]).reshape(
                 -1, 3)
+
             self.points_[:len(points)] = points[:]
+            self.pointcloud.append(points[:])
+            # print("----------------------------------------------------- ")
 
     def __edges_all(self):
         return flatmeshgrid(torch.arange(0, self.m, device="cuda"),
@@ -361,10 +415,14 @@ class DPVO:
     def __edges_forw(self):
         # the configured lifetime of patches, which determines how many frames a patch should be tracked.
         r = self.cfg.PATCH_LIFETIME
-        
+
         #These variables define the range of temporal indices for patches
-        t0 = self.M * max((self.n - r), 0) # This is the start index based on the current frame self.n, patch lifetime r, and a multiplier (number of patches per frame).
-        t1 = self.M * max((self.n - 1), 0) # This is the end index for the forward edges.
+        # This is the start index based on the current frame self.n, patch lifetime r, and a multiplier (number of patches per frame).
+        t0 = self.M * max((self.n - r), 0)
+        # This is the end index for the forward edges.
+        t1 = self.M * max((self.n - 1), 0)
+
+        # returns the connection between the patch index and frame index
         return flatmeshgrid(torch.arange(t0, t1, device="cuda"),
                             torch.arange(self.n - 1, self.n, device="cuda"),
                             indexing='ij')
@@ -389,9 +447,9 @@ class DPVO:
         image = 2 * (image[None, None] / 255.0) - 0.5
 
         with autocast(enabled=self.cfg.MIXED_PRECISION):
-            # 1- feature map Size(1, 1, 128, 132, 240)
+            # 1- feature map of the frame Size(1, 1, 128, 132, 240)
             # 2- corresponding patches of the feature map Size([1, 96, 128, 3, 3])
-            # 3- corresponding patches of the intrensics map Size([1, 96, 384, 1, 1])
+            # 3- corresponding patches of the context map Size([1, 96, 384, 1, 1])
             # 4- patches of the image centered around coords with added disparity Size([1, 96, 3, 3, 3])
             fmap, gmap, imap, patches, _, clr = \
                 self.network.patchify(image,
@@ -408,7 +466,8 @@ class DPVO:
         clr = (clr[0, :, [2, 1, 0]] + 0.5) * (255.0 / 2)
         self.colors_[self.n] = clr.to(torch.uint8)
 
-        self.index_[self.n + 1] = self.n + 1
+        # Stor the frame index for the corresponding patches
+        self.index_[self.n + 1] = self.n + 1  # size(2084x96)
         self.index_map_[self.n + 1] = self.m + self.M
 
         if self.n > 1:
@@ -424,20 +483,26 @@ class DPVO:
                 self.poses_[self.n] = tvec_qvec
 
         # TODO better depth initialization
-        patches[:, :, 2] = torch.rand_like(patches[:, :, 2, 0, 0, None, None]) #Size([1, 96, 3, 3, 3])
+        #Size([1, 96, 3, 3, 3])
+        patches[:, :, 2] = torch.rand_like(patches[:, :, 2, 0, 0, None, None])
 
         if self.is_initialized:
+            # update the depth by taking the median of depth across the current frame and previous 3 frames
             s = torch.median(self.patches_[self.n - 3:self.n, :, 2])
             patches[:, :, 2] = s
         self.patches_[self.n] = patches
-        
+
+        ### update network attributes ###
         # The memorey of the system is set in self.mem = 32
         # Thus these tensors will hold the values for the last 32 frame
 
-        ### update network attributes ###
+        # save the context maps of the patches
         self.imap_[self.n % self.mem] = imap.squeeze()
+        # save the feature maps of the patches
         self.gmap_[self.n % self.mem] = gmap.squeeze()
+        # save the feature map of the frame
         self.fmap1_[:, self.n % self.mem] = F.avg_pool2d(fmap[0], 1, 1)
+        # save the feature/4 map of the frame
         self.fmap2_[:, self.n % self.mem] = F.avg_pool2d(fmap[0], 4, 4)
 
         self.counter += 1
@@ -446,7 +511,7 @@ class DPVO:
                 self.delta[self.counter - 1] = (self.counter - 2, Id[0])
                 return
 
-        self.n += 1 # increase the number of frames in the graph by 1
+        self.n += 1  # increase the number of frames in the graph by 1
         self.m += self.M  # increase the number of patches in the graph by 96
 
         # relative pose

@@ -35,7 +35,6 @@ def run(cfg, network, imagedir, calib, stride=1, skip=0, viz=False, timeit=False
         # t in the inference frame index or let's say it is the inference index 
         (t, image, intrinsics) = queue.get()
         if t < 0: break
-        
         # the raw input image is resized to its 0.5 scale in video_stream
         image = torch.from_numpy(image).permute(2,0,1).cuda()
 
@@ -55,7 +54,6 @@ def run(cfg, network, imagedir, calib, stride=1, skip=0, viz=False, timeit=False
         slam.update()
 
     reader.join()
-    print()
 
     return slam.terminate()
 

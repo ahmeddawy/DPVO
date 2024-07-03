@@ -73,6 +73,13 @@ class Update(nn.Module):
 
     def forward(self, net, inp, corr, flow, ii, jj, kk):
         """ update operator """
+        # Inputs shapes
+        # net -> Size[1,len(ii),384]
+        # inp are the patches context maps -> Size[1,96,384]
+        # corr are the cooleration between patches[kk] feature maps and frame_jj feature map -> Size[1,len(ii),882]
+        # ii are index of the frame that patches[kk] belong to -> Size[1,96]
+        # jj are index of frame to which patches[kk] are projected to -> Size[1,96]
+        # kk are indices of the patches -> Size[1,96]
 
         net = net + inp + self.corr(corr)
         net = self.norm(net)
@@ -135,9 +142,9 @@ class Patchifier(nn.Module):
         # we have the center coordinates (x,y) of the patches 
         coords = torch.stack([x, y], dim=-1).float() # size (1,96,2)
         
-        # Extract the corresponding patches from the intrensics map and the feature map
+        # Extract the corresponding patches from the context map and the feature map
         
-        # Extract the corresponding patches from the intrensics map centered around each coordinate in coords with radious 0,
+        # Extract the corresponding patches from the context map centered around each coordinate in coords with radious 0,
         # The extracted patches are then reshaped to have the shape [b, -1, 384, 1, 1],
         imap = altcorr.patchify(imap[0], coords, 0).view(b, -1, DIM, 1, 1)    # Size([1, 96, 384, 1, 1])
         
@@ -173,7 +180,7 @@ class Patchifier(nn.Module):
         # return 
         # 1- feature map Size(1, 1, 128, 132, 240)
         # 2- corresponding patches of the feature map Size([1, 96, 128, 3, 3])
-        # 3- corresponding patches of the intrensics map Size([1, 96, 384, 1, 1])
+        # 3- corresponding patches of the context map Size([1, 96, 384, 1, 1])
         # 4- patches of the image centered around coords with added disparity Size([1, 96, 3, 3, 3])
 
         return fmap, gmap, imap, patches, index
