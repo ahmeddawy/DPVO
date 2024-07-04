@@ -11,12 +11,24 @@ import random
 import json
 import pickle
 import os.path as osp
+import json
 
 from .augmentation import RGBDAugmentor
 from .rgbd_utils import *
+import pprint
+
 
 class RGBDDataset(data.Dataset):
-    def __init__(self, name, datapath, n_frames=4, crop_size=[480,640], fmin=10.0, fmax=75.0, aug=True, sample=True):
+
+    def __init__(self,
+                 name,
+                 datapath,
+                 n_frames=4,
+                 crop_size=[480, 640],
+                 fmin=10.0,
+                 fmax=75.0,
+                 aug=True,
+                 sample=True):
         """ Base class for RGBD dataset """
         self.aug = None
         self.root = datapath
@@ -26,9 +38,9 @@ class RGBDDataset(data.Dataset):
         self.sample = sample
 
         self.n_frames = n_frames
-        self.fmin = fmin # exclude very easy examples
-        self.fmax = fmax # exclude very hard examples
-        
+        self.fmin = fmin  # exclude very easy examples
+        self.fmax = fmax  # exclude very hard examples
+
         if self.aug:
             self.aug = RGBDAugmentor(crop_size=crop_size)
 
@@ -36,22 +48,27 @@ class RGBDDataset(data.Dataset):
         cur_path = osp.dirname(osp.abspath(__file__))
         if not os.path.isdir(osp.join(cur_path, 'cache')):
             os.mkdir(osp.join(cur_path, 'cache'))
-        
+
+
         self.scene_info = \
             pickle.load(open('datasets/TartanAir.pickle', 'rb'))[0]
 
         self._build_dataset_index()
-                
+
     def _build_dataset_index(self):
         self.dataset_index = []
+        samples_counter = 0
         for scene in self.scene_info:
-            if not self.__class__.is_test_scene(scene):
+            if not self.__class__.is_test_scene(
+                    scene) and self.__class__.is_scene_found(scene):
+                samples_counter = samples_counter + 1
                 graph = self.scene_info[scene]['graph']
                 for i in graph:
                     if i < len(graph) - 65:
                         self.dataset_index.append((scene, i))
             else:
                 print("Reserving {} for validation".format(scene))
+        print("Total number of Training Samples: ", samples_counter)
 
     @staticmethod
     def image_read(image_file):
@@ -63,21 +80,22 @@ class RGBDDataset(data.Dataset):
 
     def build_frame_graph(self, poses, depths, intrinsics, f=16, max_flow=256):
         """ compute optical flow distance between all pairs of frames """
+
         def read_disp(fn):
-            depth = self.__class__.depth_read(fn)[f//2::f, f//2::f]
+            depth = self.__class__.depth_read(fn)[f // 2::f, f // 2::f]
             depth[depth < 0.01] = np.mean(depth)
             return 1.0 / depth
 
         poses = np.array(poses)
         intrinsics = np.array(intrinsics) / f
-        
+
         disps = np.stack(list(map(read_disp, depths)), 0)
         d = f * compute_distance_matrix_flow(poses, disps, intrinsics)
 
         graph = {}
         for i in range(d.shape[0]):
             j, = np.where(d[i] < max_flow)
-            graph[i] = (j, d[i,j])
+            graph[i] = (j, d[i, j])
 
         return graph
 
@@ -98,13 +116,14 @@ class RGBDDataset(data.Dataset):
         d = np.random.uniform(self.fmin, self.fmax)
         s = 1
 
-        inds = [ ix ]
+        inds = [ix]
 
         while len(inds) < self.n_frames:
             # get other frames within flow threshold
 
             if self.sample:
-                k = (frame_graph[ix][1] > self.fmin) & (frame_graph[ix][1] < self.fmax)
+                k = (frame_graph[ix][1] > self.fmin) & (frame_graph[ix][1]
+                                                        < self.fmax)
                 frames = frame_graph[ix][0][k]
 
                 # prefer frames forward in time
@@ -134,9 +153,8 @@ class RGBDDataset(data.Dataset):
                         s *= -1
 
                     ix = ix + s
-            
-            inds += [ ix ]
 
+            inds += [ix]
 
         images, depths, poses, intrinsics = [], [], [], []
         for i in inds:
@@ -164,9 +182,9 @@ class RGBDDataset(data.Dataset):
         # normalize depth
         s = .7 * torch.quantile(disps, .98)
         disps = disps / s
-        poses[...,:3] *= s
+        poses[..., :3] *= s
 
-        return images, poses, disps, intrinsics 
+        return images, poses, disps, intrinsics
 
     def __len__(self):
         return len(self.dataset_index)

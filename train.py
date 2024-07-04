@@ -23,10 +23,12 @@ def show_image(image):
     cv2.imshow('image', image / 255.0)
     cv2.waitKey()
 
+
 def image2gray(image):
     image = image.mean(dim=0).cpu().numpy()
     cv2.imshow('image', image / 255.0)
     cv2.waitKey()
+
 
 def kabsch_umeyama(A, B):
     n, m = A.shape
@@ -47,7 +49,9 @@ def train(args):
     # legacy ddp code
     rank = 0
 
-    db = dataset_factory(['tartan'], datapath="datasets/TartanAir", n_frames=args.n_frames)
+    db = dataset_factory(['tartan'],
+                         datapath="datasets/TartanAir",
+                         n_frames=args.n_frames)
     train_loader = DataLoader(db, batch_size=1, shuffle=True, num_workers=4)
 
     net = VONet()
@@ -61,10 +65,16 @@ def train(args):
             new_state_dict[k.replace('module.', '')] = v
         net.load_state_dict(new_state_dict, strict=False)
 
-    optimizer = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-6)
+    optimizer = torch.optim.AdamW(net.parameters(),
+                                  lr=args.lr,
+                                  weight_decay=1e-6)
 
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 
-        args.lr, args.steps, pct_start=0.01, cycle_momentum=False, anneal_strategy='linear')
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,
+                                                    args.lr,
+                                                    args.steps,
+                                                    pct_start=0.01,
+                                                    cycle_momentum=False,
+                                                    anneal_strategy='linear')
 
     if rank == 0:
         logger = Logger(args.name, scheduler)
@@ -73,14 +83,22 @@ def train(args):
 
     while 1:
         for data_blob in train_loader:
-            images, poses, disps, intrinsics = [x.cuda().float() for x in data_blob]
+            images, poses, disps, intrinsics = [
+                x.cuda().float() for x in data_blob
+            ]
             optimizer.zero_grad()
 
             # fix poses to gt for first 1k steps
             so = total_steps < 1000 and args.ckpt is None
 
             poses = SE3(poses).inv()
-            traj = net(images, poses, disps, intrinsics, M=1024, STEPS=18, structure_only=so)
+            traj = net(images,
+                       poses,
+                       disps,
+                       intrinsics,
+                       M=1024,
+                       STEPS=18,
+                       structure_only=so)
 
             loss = 0.0
             for i, (v, x, y, P1, P2, kl) in enumerate(traj):
@@ -99,22 +117,22 @@ def train(args):
                 P1 = P1.inv()
                 P2 = P2.inv()
 
-                t1 = P1.matrix()[...,:3,3]
-                t2 = P2.matrix()[...,:3,3]
+                t1 = P1.matrix()[..., :3, 3]
+                t2 = P2.matrix()[..., :3, 3]
 
                 s = kabsch_umeyama(t2[0], t1[0]).detach().clamp(max=10.0)
                 P1 = P1.scale(s.view(1, 1))
 
-                dP = P1[:,ii].inv() * P1[:,jj]
-                dG = P2[:,ii].inv() * P2[:,jj]
+                dP = P1[:, ii].inv() * P1[:, jj]
+                dG = P2[:, ii].inv() * P2[:, jj]
 
                 e1 = (dP * dG.inv()).log()
-                tr = e1[...,0:3].norm(dim=-1)
-                ro = e1[...,3:6].norm(dim=-1)
+                tr = e1[..., 0:3].norm(dim=-1)
+                ro = e1[..., 3:6].norm(dim=-1)
 
                 loss += args.flow_weight * e.mean()
                 if not so and i >= 2:
-                    loss += args.pose_weight * ( tr.mean() + ro.mean() )
+                    loss += args.pose_weight * (tr.mean() + ro.mean())
 
             # kl is 0 (not longer used)
             loss += kl

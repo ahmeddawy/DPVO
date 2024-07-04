@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch
 import glob
@@ -13,40 +12,58 @@ from .base import RGBDDataset
 # test_split = osp.join(cur_path, 'tartan_test.txt')
 # test_split = open(test_split).read().split()
 
+# test_split = [
+#     "abandonedfactory/abandonedfactory/Easy/P011",
+#     "abandonedfactory/abandonedfactory/Hard/P011",
+#     "abandonedfactory_night/abandonedfactory_night/Easy/P013",
+#     "abandonedfactory_night/abandonedfactory_night/Hard/P014",
+#     "amusement/amusement/Easy/P008",
+#     "amusement/amusement/Hard/P007",
+#     "carwelding/carwelding/Easy/P007",
+#     "endofworld/endofworld/Easy/P009",
+#     "gascola/gascola/Easy/P008",
+#     "gascola/gascola/Hard/P009",
+#     "hospital/hospital/Easy/P036",
+#     "hospital/hospital/Hard/P049",
+#     "japanesealley/japanesealley/Easy/P007",
+#     "japanesealley/japanesealley/Hard/P005",
+#     "neighborhood/neighborhood/Easy/P021",
+#     "neighborhood/neighborhood/Hard/P017",
+#     "ocean/ocean/Easy/P013",
+#     "ocean/ocean/Hard/P009",
+#     "office2/office2/Easy/P011",
+#     "office2/office2/Hard/P010",
+#     "office/office/Hard/P007",
+#     "oldtown/oldtown/Easy/P007",
+#     "oldtown/oldtown/Hard/P008",
+#     "seasidetown/seasidetown/Easy/P009",
+#     "seasonsforest/seasonsforest/Easy/P011",
+#     "seasonsforest/seasonsforest/Hard/P006",
+#     "seasonsforest_winter/seasonsforest_winter/Easy/P009",
+#     "seasonsforest_winter/seasonsforest_winter/Hard/P018",
+#     "soulcity/soulcity/Easy/P012",
+#     "soulcity/soulcity/Hard/P009",
+#     "westerndesert/westerndesert/Easy/P013",
+#     "westerndesert/westerndesert/Hard/P007",
+# ]
 
 test_split = [
-    "abandonedfactory/abandonedfactory/Easy/P011",
-    "abandonedfactory/abandonedfactory/Hard/P011",
-    "abandonedfactory_night/abandonedfactory_night/Easy/P013",
-    "abandonedfactory_night/abandonedfactory_night/Hard/P014",
-    "amusement/amusement/Easy/P008",
-    "amusement/amusement/Hard/P007",
-    "carwelding/carwelding/Easy/P007",
-    "endofworld/endofworld/Easy/P009",
-    "gascola/gascola/Easy/P008",
-    "gascola/gascola/Hard/P009",
-    "hospital/hospital/Easy/P036",
-    "hospital/hospital/Hard/P049",
-    "japanesealley/japanesealley/Easy/P007",
-    "japanesealley/japanesealley/Hard/P005",
-    "neighborhood/neighborhood/Easy/P021",
-    "neighborhood/neighborhood/Hard/P017",
-    "ocean/ocean/Easy/P013",
-    "ocean/ocean/Hard/P009",
-    "office2/office2/Easy/P011",
-    "office2/office2/Hard/P010",
-    "office/office/Hard/P007",
-    "oldtown/oldtown/Easy/P007",
-    "oldtown/oldtown/Hard/P008",
-    "seasidetown/seasidetown/Easy/P009",
-    "seasonsforest/seasonsforest/Easy/P011",
-    "seasonsforest/seasonsforest/Hard/P006",
-    "seasonsforest_winter/seasonsforest_winter/Easy/P009",
-    "seasonsforest_winter/seasonsforest_winter/Hard/P018",
-    "soulcity/soulcity/Easy/P012",
-    "soulcity/soulcity/Hard/P009",
-    "westerndesert/westerndesert/Easy/P013",
-    "westerndesert/westerndesert/Hard/P007",
+    "abandonedfactory_sample_P001/P001",
+    "abandonedfactory_night_sample_P002/P002",
+    "amusement_sample_P008/P008",
+]
+
+exist_scenes = [
+    'abandonedfactory/abandonedfactory/Easy/P001',
+    'abandonedfactory_night/abandonedfactory_night/Easy/P002',
+    'amusement/amusement/Easy/P008', 'carwelding/carwelding/Easy/P007',
+    'endofworld/endofworld/Easy/P001', 'gascola/gascola/Easy/P001',
+    'hospital/hospital/Easy/P000', 'japanesealley/japanesealley/Easy/P007',
+    'neighborhood/neighborhood/Easy/P002', 'ocean/ocean/Easy/P006',
+    'office2/office2/Easy/P003', 'seasidetown/seasidetown/Easy/P003',
+    'seasonsforest/seasonsforest/Easy/P002',
+    'seasonsforest_winter/seasonsforest_winter/Easy/P006',
+    'soulcity/soulcity/Easy/P003', 'westerndesert/westerndesert/Easy/P002'
 ]
 
 
@@ -60,10 +77,14 @@ class TartanAir(RGBDDataset):
         self.n_frames = 2
         super(TartanAir, self).__init__(name='TartanAir', **kwargs)
 
-    @staticmethod 
+    @staticmethod
     def is_test_scene(scene):
-        # print(scene, any(x in scene for x in test_split))
         return any(x in scene for x in test_split)
+
+    @staticmethod
+    def is_scene_found(scene):
+        # print(scene, any(x in scene for x in test_split))
+        return any(x in scene for x in exist_scenes)
 
     def _build_dataset(self):
         from tqdm import tqdm
@@ -77,18 +98,23 @@ class TartanAir(RGBDDataset):
 
             if len(images) != len(depths):
                 continue
-            
+
             poses = np.loadtxt(osp.join(scene, 'pose_left.txt'), delimiter=' ')
             poses = poses[:, [1, 2, 0, 4, 5, 3, 6]]
-            poses[:,:3] /= TartanAir.DEPTH_SCALE
+            poses[:, :3] /= TartanAir.DEPTH_SCALE
             intrinsics = [TartanAir.calib_read()] * len(images)
 
             # graph of co-visible frames based on flow
             graph = self.build_frame_graph(poses, depths, intrinsics)
 
             scene = '/'.join(scene.split('/'))
-            scene_info[scene] = {'images': images, 'depths': depths, 
-                'poses': poses, 'intrinsics': intrinsics, 'graph': graph}
+            scene_info[scene] = {
+                'images': images,
+                'depths': depths,
+                'poses': poses,
+                'intrinsics': intrinsics,
+                'graph': graph
+            }
 
         return scene_info
 
@@ -103,8 +129,6 @@ class TartanAir(RGBDDataset):
     @staticmethod
     def depth_read(depth_file):
         depth = np.load(depth_file) / TartanAir.DEPTH_SCALE
-        depth[depth==np.nan] = 1.0
-        depth[depth==np.inf] = 1.0
+        depth[depth == np.nan] = 1.0
+        depth[depth == np.inf] = 1.0
         return depth
-
-
