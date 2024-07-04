@@ -207,7 +207,7 @@ class DPVO:
         poses = [self.get_pose(t) for t in range(self.counter)]
         poses = lietorch.stack(poses, dim=0)
         poses = poses.inv().data.cpu().numpy()
-        tstamps = np.array(self.tlist, dtype=np.float32)
+        tstamps = np.array(self.tlist, dtype=np.float64) # float64 to fix TUM timestamp error
 
         if self.viewer is not None:
             self.viewer.join()
@@ -220,6 +220,8 @@ class DPVO:
         # np.save('./plot/point_cloud.npy', pointcloud_np)
         # np.save('./plot/poses.npy', poses)
         # torch.save(self.pointcloud, './plot/pointcloud_list.pt')
+        print("1st timestamps ",tstamps[0])
+        print("last timestamps ",tstamps[-1])
 
         return poses, tstamps
 
@@ -458,6 +460,7 @@ class DPVO:
                     return_color=True)
 
         ### update state attributes ###
+        print("tstamp ",tstamp)
         self.tlist.append(tstamp)
         self.tstamps_[self.n] = self.counter
         self.intrinsics_[self.n] = intrinsics / self.RES
