@@ -97,7 +97,7 @@ def train(args):
                        disps,
                        intrinsics,
                        M=1024,
-                       STEPS=18,
+                       STEPS=8,
                        structure_only=so)
 
             loss = 0.0

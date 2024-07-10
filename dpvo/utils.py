@@ -1,10 +1,14 @@
 import torch
 import torch.nn.functional as F
-
+from ultralytics import YOLO
+import cv2
+import numpy as np
 
 all_times = []
 
+
 class Timer:
+
     def __init__(self, name, enabled=True):
         self.name = name
         self.enabled = enabled
@@ -16,7 +20,7 @@ class Timer:
     def __enter__(self):
         if self.enabled:
             self.start.record()
-        
+
     def __exit__(self, type, value, traceback):
         global all_times
         if self.enabled:
@@ -33,7 +37,8 @@ def coords_grid(b, n, h, w, **kwargs):
     x = torch.arange(0, w, dtype=torch.float, **kwargs)
     y = torch.arange(0, h, dtype=torch.float, **kwargs)
     coords = torch.stack(torch.meshgrid(y, x, indexing="ij"))
-    return coords[[1,0]].view(1, 1, 2, h, w).repeat(b, n, 1, 1, 1)
+    return coords[[1, 0]].view(1, 1, 2, h, w).repeat(b, n, 1, 1, 1)
+
 
 def coords_grid_with_index(d, **kwargs):
     """ coordinate grid with frame index"""
@@ -52,12 +57,13 @@ def coords_grid_with_index(d, **kwargs):
 
     return coords, index
 
+
 def patchify(x, patch_size=3):
     """ extract patches from video """
     b, n, c, h, w = x.shape
-    x = x.view(b*n, c, h, w)
+    x = x.view(b * n, c, h, w)
     y = F.unfold(x, patch_size)
-    y = y.transpose(1,2)
+    y = y.transpose(1, 2)
     return y.reshape(b, -1, c, patch_size, patch_size)
 
 
@@ -67,21 +73,61 @@ def pyramidify(fmap, lvls=[1]):
 
     pyramid = []
     for lvl in lvls:
-        gmap =  F.avg_pool2d(fmap.view(b*n, c, h, w), lvl, stride=lvl)
-        pyramid += [ gmap.view(b, n, c, h//lvl, w//lvl) ]
-        
+        gmap = F.avg_pool2d(fmap.view(b * n, c, h, w), lvl, stride=lvl)
+        pyramid += [gmap.view(b, n, c, h // lvl, w // lvl)]
+
     return pyramid
 
+
 def all_pairs_exclusive(n, **kwargs):
-    ii, jj = torch.meshgrid(torch.arange(n, **kwargs), torch.arange(n, **kwargs))
+    ii, jj = torch.meshgrid(torch.arange(n, **kwargs),
+                            torch.arange(n, **kwargs))
     k = ii != jj
     return ii[k].reshape(-1), jj[k].reshape(-1)
 
+
 def set_depth(patches, depth):
-    patches[...,2,:,:] = depth[...,None,None]
+    patches[..., 2, :, :] = depth[..., None, None]
     return patches
+
 
 def flatmeshgrid(*args, **kwargs):
     grid = torch.meshgrid(*args, **kwargs)
     return (x.reshape(-1) for x in grid)
 
+
+def get_human_masks(image):
+    human_segmentor = YOLO('yolov8x-seg.pt')
+    # human_segmentor.to(torch.device("cpu"))
+    kernel = np.ones((21, 21), np.uint8)
+    all_human_mask_pixels = None
+    if image is not None:
+        human_mask_results = human_segmentor(image,conf=0.5)
+        human_mask_pixels = []
+
+        # Process each result
+        for data in human_mask_results:
+            classes = data.boxes.cls.tolist()
+            names = data.names
+            if data.masks is not None:
+                masks = data.masks.xy
+                for i, mask in enumerate(masks):
+                    class_name = names[int(classes[i])]
+                    if class_name == "person":
+                        # Create a mask image
+                        mask_img = np.zeros(image.shape[:2], dtype=np.uint8)
+                        cv2.fillPoly(mask_img,
+                                     [np.array(mask, dtype=np.int32)], 255)
+
+                        dilated_mask_img = cv2.dilate(mask_img,
+                                                      kernel,
+                                                      iterations=1)
+
+                        # Store the pixels of the mask
+                        mask_pixels = np.column_stack(
+                            np.where(dilated_mask_img == 255))
+                        # mask_pixels = mask_pixels // 4
+                        human_mask_pixels.append(mask_pixels)
+        all_human_mask_pixels = np.vstack(
+            human_mask_pixels) if human_mask_pixels else np.array([])
+    return all_human_mask_pixels

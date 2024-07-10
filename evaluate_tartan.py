@@ -4,6 +4,7 @@ import os
 import datetime
 import numpy as np
 import os.path as osp
+from pathlib import Path
 
 import torch
 from dpvo.dpvo import DPVO
@@ -11,6 +12,7 @@ from dpvo.utils import Timer
 from dpvo.config import cfg
 
 from dpvo.data_readers.tartan import test_split as val_split
+from dpvo.plot_utils import plot_trajectory, save_trajectory_tum_format
 
 test_split = \
     ["MH%03d"%i for i in range(8)] + \
@@ -27,12 +29,15 @@ def show_image(image, t=0):
 
 def video_iterator(imagedir, ext=".png", preload=True):
     imfiles = glob.glob(osp.join(imagedir, "*{}".format(ext)))
+    print("imfiles ",imagedir)
 
     data_list = []
     for imfile in sorted(imfiles)[::STRIDE]:
         image = torch.from_numpy(cv2.imread(imfile)).permute(2,0,1)
         intrinsics = torch.as_tensor([fx, fy, cx, cy])
         data_list.append((image, intrinsics))
+
+    if len(data_list) == 0: raise Exception("Failed to read input.")
 
     for (image, intrinsics) in data_list:
         yield image.cuda(), intrinsics.cuda()
@@ -77,7 +82,7 @@ def ate(traj_ref, traj_est, timestamps):
 
 
 @torch.no_grad()
-def evaluate(config, net, split="validation", trials=1):
+def evaluate(config, net, split="validation", trials=1, plot=False, save=False):
 
     if config is None:
         config = cfg
@@ -87,7 +92,7 @@ def evaluate(config, net, split="validation", trials=1):
         os.mkdir("TartanAirResults")
 
     scenes = test_split if split=="test" else val_split
-
+    print("scenes ",scenes)
     results = {}
     all_results = []
     for i, scene in enumerate(scenes):
@@ -109,10 +114,28 @@ def evaluate(config, net, split="validation", trials=1):
 
             PERM = [1, 2, 0, 4, 5, 3, 6] # ned -> xyz
             traj_ref = np.loadtxt(traj_ref, delimiter=" ")[::STRIDE, PERM]
+            if save:
+                Path("TARTANAIR_saved_trajectories").mkdir(exist_ok=True)
+                save_trajectory_tum_format((traj_est, tstamps), f"TARTANAIR_saved_trajectories/TartanAir_{scene}_Trial{j+1:02d}.txt")
+                save_trajectory_tum_format((traj_ref,tstamps), f"TARTANAIR_saved_trajectories/TartanAir_ref_{scene}_Trial{j+1:02d}.txt")
+
+
 
             # do evaluation
-            all_results.append(ate(traj_ref, traj_est, tstamps))
-            results[scene].append(ate(traj_ref, traj_est, tstamps))
+            ate_score = ate(traj_ref, traj_est, tstamps)
+            all_results.append(ate_score)
+            results[scene].append(ate_score)
+
+            # if plot:
+            #     scene_name = '_'.join(scene.split('/')[1:]).title()
+            #     Path("trajectory_plots").mkdir(exist_ok=True)
+            #     plot_trajectory((traj_est, tstamps), (traj_ref, tstamps), f"TartanAir {scene_name.replace('_', ' ')} Trial #{j+1} (ATE: {ate_score:.03f})",
+            #                     f"trajectory_plots/TartanAir_{scene_name}_Trial{j+1:02d}.pdf", align=True, correct_scale=True)
+
+            # if save:
+            #     Path("saved_trajectories").mkdir(exist_ok=True)
+            #     save_trajectory_tum_format((traj_est, tstamps), f"saved_trajectories/TartanAir_{scene_name}_Trial{j+1:02d}.txt")
+            #     save_trajectory_tum_format((traj_ref,tstamps), f"saved_trajectories/TartanAir_ref_{scene_name}_Trial{j+1:02d}.txt")
 
         print(scene, sorted(results[scene]))
 
@@ -144,6 +167,8 @@ if __name__ == '__main__':
     parser.add_argument('--config', default="config/default.yaml")
     parser.add_argument('--split', default="validation")
     parser.add_argument('--trials', type=int, default=1)
+    parser.add_argument('--plot', action="store_true")
+    parser.add_argument('--save_trajectory', action="store_true")
     args = parser.parse_args()
 
     cfg.merge_from_file(args.config)
@@ -164,6 +189,6 @@ if __name__ == '__main__':
         print(ate(traj_ref, traj_est, tstamps))
 
     else:
-        results = evaluate(cfg, args.weights, split=args.split, trials=args.trials)
+        results = evaluate(cfg, args.weights, split=args.split, trials=args.trials, plot=args.plot, save=args.save_trajectory)
         for k in results:
             print(k, results[k])

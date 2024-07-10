@@ -95,7 +95,7 @@ if __name__ == '__main__':
 
     torch.manual_seed(1234)
 
-    euroc_scenes = ["MH_01_easy", "MH_02_easy","MH_03_medium"]
+    euroc_scenes = ["MH_01_easy", "MH_02_easy","MH_03_medium","MH_04_difficult",'MH_05_difficult','V1_01_easy','V1_02_medium','V1_03_difficult','V2_01_easy']
 
     results = {}
     for scene in euroc_scenes:
@@ -124,42 +124,46 @@ if __name__ == '__main__':
             #     traj_ref.get_infos()['t_start (s)'] -
             #     traj_est.get_infos()['t_start (s)'])
 
-            traj_ref, traj_est = sync.associate_trajectories(
+            if args.save_trajectory:
+                Path("Euroc_saved_trajectories").mkdir(exist_ok=True)
+                save_trajectory_tum_format(
+                    traj_est,
+                    f"Euroc_saved_trajectories/Euroc_Estimated_{scene}_Trial{i+1:02d}.txt")
+                save_trajectory_tum_format(
+                    traj_ref,
+                    f"Euroc_saved_trajectories/Euroc_GroundTruth_{scene}_Trial{i+1:02d}.txt")
+                
+            traj_ref_sync, traj_est_sync = sync.associate_trajectories(
                 traj_ref, traj_est)
 
-            result = main_ape.ape(traj_ref,
-                                  traj_est,
+            result = main_ape.ape(traj_ref_sync,
+                                  traj_est_sync,
                                   est_name='traj',
                                   pose_relation=PoseRelation.translation_part,
                                   align=True,
                                   correct_scale=True)
             ate_score = result.stats["rmse"]
 
-            if args.plot:
-                scene_name = '_'.join(scene.split('/')[1:]).title()
-                Path("trajectory_plots").mkdir(exist_ok=True)
-                plot_trajectory(
-                    traj_est,
-                    traj_ref,
-                    f"Euroc {scene} Trial #{i+1} (ATE: {ate_score:.03f})",
-                    f"trajectory_plots/Euroc_{scene}_Trial{i+1:02d}.pdf",
-                    align=True,
-                    correct_scale=True)
+            # if args.plot:
+            #     scene_name = '_'.join(scene.split('/')[1:]).title()
+            #     Path("trajectory_plots").mkdir(exist_ok=True)
+            #     plot_trajectory(
+            #         traj_est,
+            #         traj_ref,
+            #         f"Euroc {scene} Trial #{i+1} (ATE: {ate_score:.03f})",
+            #         f"trajectory_plots/Euroc_{scene}_Trial{i+1:02d}.pdf",
+            #         align=True,
+            #         correct_scale=True)
 
-            if args.save_trajectory:
-                Path("saved_trajectories").mkdir(exist_ok=True)
-                save_trajectory_tum_format(
-                    traj_est,
-                    f"saved_trajectories/Euroc_{scene}_Trial{i+1:02d}.txt")
 
             scene_results.append(ate_score)
 
         results[scene] = np.median(scene_results)
         print(scene, sorted(scene_results))
 
-    xs = []
-    for scene in results:
-        print(scene, results[scene])
-        xs.append(results[scene])
+    # xs = []
+    # for scene in results:
+    #     print(scene, results[scene])
+    #     xs.append(results[scene])
 
-    print("AVG: ", np.mean(xs))
+    # print("AVG: ", np.mean(xs))

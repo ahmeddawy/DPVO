@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
+import cv2
 
 torch.set_printoptions(threshold=torch.inf)
 
@@ -17,9 +18,16 @@ autocast = torch.cuda.amp.autocast
 Id = SE3.Identity(1, device="cuda")
 
 
+def draw_rectangle(image, top_left, patch_size, color=(0, 0, 0)):
+    x, y = top_left
+    image[y:y + patch_size[0], x:x + patch_size[1], :] = color
+    return image
+
+
 class DPVO:
 
     def __init__(self, cfg, network, ht=480, wd=640, viz=False):
+        torch.cuda.empty_cache()
         self.cfg = cfg
         self.load_weights(network)  # load dpvo.pt
         self.is_initialized = False
@@ -212,15 +220,6 @@ class DPVO:
 
         if self.viewer is not None:
             self.viewer.join()
-        # print("poses ", poses.shape)
-        # print("pointclous ", self.points_.shape)
-        # print("tstamps ", tstamps.shape)
-        # pointcloud_np = self.points_.cpu().numpy()
-
-        # # Save the NumPy array to a file
-        # np.save('./plot/point_cloud.npy', pointcloud_np)
-        # np.save('./plot/poses.npy', poses)
-        # torch.save(self.pointcloud, './plot/pointcloud_list.pt')
 
         return poses, tstamps
 
@@ -438,12 +437,13 @@ class DPVO:
                                          device="cuda"),
                             indexing='ij')
 
-    def __call__(self, tstamp, image, intrinsics):
+    def __call__(self, tstamp, image, intrinsics, human_masks=None):
         """ track new frame """
 
-        if self.viewer is not None:
-            self.viewer.update_image(image)
-            self.viewer.loop()
+        viewer_image = image.detach().clone()
+        viewer_image = viewer_image.permute(1, 2, 0)
+        viewer_image_np = viewer_image.cpu().numpy()
+
         # Batch the first two dimensions of the image tensor to be [1,1,3,h,w], then Normalize to the range [-0.5, 0.5]
         image = 2 * (image[None, None] / 255.0) - 0.5
 
@@ -456,9 +456,57 @@ class DPVO:
                 self.network.patchify(image,
                     patches_per_image=self.cfg.PATCHES_PER_FRAME,
                     gradient_bias=self.cfg.GRADIENT_BIAS,
-                    return_color=True)
+                    return_color=True, human_masks=human_masks)
 
-        ### update state attributes ###
+        patches_np = patches.squeeze().cpu().numpy()
+        x_coords = patches_np[:, 0, :, :].reshape(-1, 3 * 3)
+        y_coords = patches_np[:, 1, :, :].reshape(-1, 3 * 3)
+        x_min = (x_coords.min(axis=1)) * 4
+        x_max = (x_coords.max(axis=1)) * 4
+        y_min = (y_coords.min(axis=1)) * 4
+        y_max = (y_coords.max(axis=1)) * 4
+
+        # Draw rectangles on the image
+        for i in range(len(x_min)):
+            start_point = (int(x_min[i]), int(y_min[i]))  # Top-left corner
+            end_point = (int(x_max[i]), int(y_max[i]))  # Bottom-right corner
+
+            rect_points = np.array(
+                [
+                    [start_point[0], start_point[1]],  # Top-left
+                    [end_point[0], start_point[1]],  # Top-right
+                    [end_point[0], end_point[1]],  # Bottom-right
+                    [start_point[0], end_point[1]]  # Bottom-left
+                ],
+                dtype=np.int32)
+            color = (0, 0, 0)
+            cv2.fillPoly(viewer_image_np, [rect_points], color)
+
+        if human_masks is not None:
+            # Populate the mask overlay with the mask pixels
+            human_mask_overlay = np.zeros(viewer_image_np.shape[:2],
+                                          dtype=np.uint8)
+            for pixel in human_masks:
+                human_mask_overlay[pixel[0], pixel[1]] = 255
+
+            # Create a colored version of the mask overlay
+            colored_mask_overlay = np.zeros_like(viewer_image_np)
+            colored_mask_overlay[human_mask_overlay == 255] = [
+                0, 255, 0
+            ]  # Green color for the mask
+
+            # Overlay the viewer image and the colored human mask
+            viewer_image_np = cv2.addWeighted(viewer_image_np, 1,
+                                              colored_mask_overlay, 0.5, 0)
+
+            # Transform the numpy image to Tensor again
+        viewer_image = torch.from_numpy(viewer_image_np)
+        viewer_image = viewer_image.permute(2, 0, 1)
+
+        if self.viewer is not None:
+            self.viewer.update_image(viewer_image)
+            self.viewer.loop()
+
         self.tlist.append(tstamp)
         self.tstamps_[self.n] = self.counter
         self.intrinsics_[self.n] = intrinsics / self.RES
