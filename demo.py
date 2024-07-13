@@ -50,7 +50,7 @@ def run(cfg,
         torch.cuda.empty_cache()
         (t, image, intrinsics) = queue.get()
 
-        all_human_mask_pixels = get_human_masks(image)
+        # all_human_mask_pixels = get_human_masks(image)
 
         if t < 0: break
         # the raw input image is resized to its 0.5 scale in video_stream
@@ -70,9 +70,9 @@ def run(cfg,
         intrinsics = intrinsics.cuda()
 
         with Timer("SLAM", enabled=timeit):
-            slam(t, image, intrinsics,
-                 human_masks=all_human_mask_pixels)  # calling  __call__
-
+            # slam(t, image, intrinsics,
+            #      human_masks=all_human_mask_pixels)  # calling  __call__
+            slam(t, image, intrinsics)  # calling  __call_
     for _ in range(12):
         slam.update()
 

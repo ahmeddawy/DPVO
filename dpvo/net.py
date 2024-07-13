@@ -98,27 +98,44 @@ class Update(nn.Module):
         """ update operator """
         # Inputs shapes
         # net -> Size[1,len(ii),384]
-        # inp are the patches context maps -> Size[1,96,384]
-        # corr are the cooleration between patches[kk] feature maps and frame_jj feature map -> Size[1,len(ii),882]
-        # ii are index of the frame that patches[kk] belong to -> Size[1,96]
-        # jj are index of frame to which patches[kk] are projected to -> Size[1,96]
-        # kk are indices of the patches -> Size[1,96]
+        # inp are the patches context maps -> Size[1,Number of Patches,384]
+        # corr are the cooleration between patches[kk] feature maps and frame_jj feature map -> Size[1,Number of Patches,882]
+        # ii are index of the frame that patches[kk] belong to -> Size[1,Number of Patches]
+        # jj are index of frame to which patches[kk] are projected to -> Size[1,Number of Patches]
+        # kk are indices of the patches -> Size[1,Number of Patches]
 
-        net = net + inp + self.corr(corr)
+        # Step-1
+        # a- transfom coorelation from 882 to 384 using self.corr -> size[batch_size, Number of Patches,384 ]
+        # b- net[1,Number of Patches,384] = net[1,Number of Patches,384] + inp(patches context maps)[1,Number of Patches,384]+ trasformed coor[]
+        # c- normalize net
+        net = net + inp + self.corr(
+            corr)  # --> correlation calc from the paper
         net = self.norm(net)
+        #-------------------------------------------------------------------------------------------------------#
 
-        ix, jx = fastba.neighbors(kk, jj)
+        # Step-2
+        # a- Find the neighboring indices for patches_kk and frames_jj
+        # b- Create a mask for valid indices ix , jx
+        # c- The network state is updated by aggregating information from neighboring patches and frames using the learned transformations c1 and c2
+        ''' - If SLAM is not init, we sends only the patches and the frames to which it is projects not the complete graph.
+            -- Thus, there will be no neighbors.
+            -- mask_ix * net[:, ix]-> and  mask_jx * net[:, jx] are all zeros 
+        '''
+        ix, jx = fastba.neighbors(
+            kk,
+            jj)  # --> This might contains the 1D convolution  from the paper
         mask_ix = (ix >= 0).float().reshape(1, -1, 1)
         mask_jx = (jx >= 0).float().reshape(1, -1, 1)
-
         net = net + self.c1(mask_ix * net[:, ix])
         net = net + self.c2(mask_jx * net[:, jx])
+        #-------------------------------------------------------------------------------------------------------#
 
-        net = net + self.agg_kk(net, kk)
+        net = net + self.agg_kk(net, kk)  # --> SoftAgg from the paper
         net = net + self.agg_ij(net, ii * 12345 + jj)
 
-        net = self.gru(net)
+        net = self.gru(net)  # --> Transition block from the paper
 
+        # --> self.d and self.w are the factor head the paper
         return net, (self.d(net), self.w(net), None)
 
 

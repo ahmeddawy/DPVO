@@ -225,17 +225,31 @@ class DPVO:
 
     def corr(self, coords, indicies=None):
         """ local correlation volume """
+        # self.kk holds the indices of the patches , self.jj holds the frame index to which patches kk was projected
         ii, jj = indicies if indicies is not None else (self.kk, self.jj)
         ii1 = ii % (self.M * self.mem)
         jj1 = jj % (self.mem)
+
+        # ii1 holds the patches indices, j11 holds the frame index
         '''
         - Find the correlation of gmap[ii1] and  self.pyramid[0][jj1] around the coordinates coords wich exists in frame_jj
         - Find the correlation of feature maps of patches[ii1] and the feature map of frame_jj1 around coords, with window size =3
         -- coords are the projection of patches[ii1]  to frame jj1
         '''
-        # Size [1,len(ii),7,7,3,3]
+
+        """
+            - self.gmap  [1, 32 * num_patches_per_frame, 128, 3, 3] -> [batch_size, total number of patches in the memeroy window, channels , patch width, patch height]
+            - self.pyramid[0]  [1, 32 , 128, 132, 240] -> [batch_size, total number of frames in the memeroy window, channels , width, height]
+
+            --- self.gmap[0][ii1] is [ii1.shape, 128, 3, 3]
+            --- self.pyramid[0][0][jj1] is [jj1.shape, 128, 132, 240]
+        
+        """
+        # Size [1,len(ii),7,7,3,3] -> Size[1,Num of Patches to compute coo , 7,7,3,3]
+        
         corr1 = altcorr.corr(self.gmap, self.pyramid[0], coords / 1, ii1, jj1,
                              3)
+
 
         # Size [1,len(ii),7,7,3,3]
         corr2 = altcorr.corr(self.gmap, self.pyramid[1], coords / 4, ii1, jj1,
@@ -253,9 +267,14 @@ class DPVO:
         return coords.permute(0, 1, 4, 2, 3).contiguous()
 
     def append_factors(self, ii, jj):
-        self.jj = torch.cat([self.jj, jj])
-        self.kk = torch.cat([self.kk, ii])
-        self.ii = torch.cat([self.ii, self.ix[ii]])
+        # ii is the patch index
+        # jj the frame index to which patch ii is connected
+
+        self.jj = torch.cat([self.jj, jj])  # frame indices
+        self.kk = torch.cat([self.kk, ii])  # patches indices
+        self.ii = torch.cat([
+            self.ii, self.ix[ii]
+        ])  # holds the indices of the original patch locations in the frame
 
         net = torch.zeros(1, len(ii), self.DIM, **self.kwargs)
         self.net = torch.cat([self.net, net], dim=1)
@@ -269,8 +288,7 @@ class DPVO:
     def motion_probe(self):
         """ kinda hacky way to ensure enough motion for initialization """
         '''1- Get the global indices of the patches of frame i
-           2- Prpject these patches to frame j (which is its next frame) '''
-
+           2- Project these patches to frame j (which is its next frame) '''
         # The patches indices of frame index i (previous frame n-1) among the indices of all patches
         kk = torch.arange(self.m - self.M, self.m, device="cuda")
         # The current frame index
@@ -294,8 +312,9 @@ class DPVO:
         net = torch.zeros(1, len(ii), self.DIM, **self.kwargs)
 
         # coords of projecting patches kk from frame ii to frame jj
-        coords = self.reproject(indicies=(ii, jj, kk))
+        # [1, 96, 2, 3, 3] -> [batch_size, M(number of Patches per frame) ,2 (channels) , x coordinates of the patch(3) , y coordinates of the patch (3)]
 
+        coords = self.reproject(indicies=(ii, jj, kk))
         with autocast(enabled=self.cfg.MIXED_PRECISION):
             '''
                 1 - Find the correlation of feature maps of patches[kk] and the feature map of frame_jj,
@@ -308,11 +327,16 @@ class DPVO:
             corr = self.corr(coords, indicies=(kk, jj))
 
             # Get the context feature maps of patches[kk]
-            # Size[1,96,384]
+            # self.imap [1,memory window x number of patches per frame, 384 ] -> contains patches context feature maps  
+            # ctx [1,  number of patches per frame , 384] -> contains patches_kk context feature maps
             ctx = self.imap[:, kk % (self.M * self.mem)]
-
             net, (delta, weight, _) = \
                 self.network.update(net, ctx, corr, None, ii, jj, kk)
+            # delta size is [batch_size , number of patches per frame , 2 ]
+            # weight size is [batch_size , number of patches per frame , 2 ]
+
+            """ 1- Calculate the norm of the delta returns along dim=-1, which means calculate the norm of the returned delta features for each patch
+                2- Sort the values and Get the median of all the values"""
 
         return torch.quantile(delta.norm(dim=-1).float(), 0.5)
 
@@ -413,13 +437,16 @@ class DPVO:
                             indexing='ij')
 
     def __edges_forw(self):
+        '''constructs edges connecting patches from the previous frames to 
+           the current frame within the specified distance r.'''
         # the configured lifetime of patches, which determines how many frames a patch should be tracked.
         r = self.cfg.PATCH_LIFETIME
 
         #These variables define the range of temporal indices for patches
-        # This is the start index based on the current frame self.n, patch lifetime r, and a multiplier (number of patches per frame).
+
+        # This is the patches start index based on the current frame self.n, patch lifetime r, and a multiplier (number of patches per frame).
         t0 = self.M * max((self.n - r), 0)
-        # This is the end index for the forward edges.
+        # This is the patches end index for the forward edges.
         t1 = self.M * max((self.n - 1), 0)
 
         # returns the connection between the patch index and frame index
@@ -428,9 +455,12 @@ class DPVO:
                             indexing='ij')
 
     def __edges_back(self):
+        '''constructs edges connecting patches from the current frame
+          to the previous frames within the specified distance r.'''
         r = self.cfg.PATCH_LIFETIME
         t0 = self.M * max((self.n - 1), 0)
         t1 = self.M * max((self.n - 0), 0)
+
         return flatmeshgrid(torch.arange(t0, t1, device="cuda"),
                             torch.arange(max(self.n - r, 0),
                                          self.n,
@@ -562,6 +592,8 @@ class DPVO:
 
         self.n += 1  # increase the number of frames in the graph by 1
         self.m += self.M  # increase the number of patches in the graph by 96
+
+        print("n ", self.n)
 
         # relative pose
         self.append_factors(*self.__edges_forw())
