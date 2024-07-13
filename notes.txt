@@ -1,0 +1,63 @@
+Graph forward , backward with n from 1 to 5 , M(number of patches per frame) = 2 , r = 3
+
+When n = 1
+------------
+Forward Edges: None, since t0 == t1.
+
+Backward Edges:
+t0 = 0, t1 = 2
+Patches: [0, 1]
+Frames: [0]
+
+When n = 2
+------------
+Forward Edges:
+t0 = 0, t1 = 2
+Patches: [0, 1]
+Frames: [1]
+
+Backward Edges:
+t0 = 2, t1 = 4
+Patches: [2, 3]
+Frames: [0, 1]
+
+When n = 3
+------------
+Forward Edges:
+t0 = 2, t1 = 4
+Patches: [2, 3]
+Frames: [2]
+
+Backward Edges:
+t0 = 4, t1 = 6
+Patches: [4, 5]
+Frames: [0, 1, 2]
+
+When n = 4
+------------
+Forward Edges:
+t0 = 4, t1 = 6
+Patches: [4, 5]
+Frames: [3]
+
+Backward Edges:
+t0 = 6, t1 = 8
+Patches: [6, 7]
+Frames: [1, 2, 3]
+
+When n = 5
+------------
+Forward Edges:
+t0 = 6, t1 = 8
+Patches: [6, 7]
+Frames: [4]
+Backward Edges:
+t0 = 8, t1 = 10
+Patches: [8, 9]
+Frames: [2, 3, 4]
+
+
+
+self.ii  tensor([0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 2, 2, 3, 3], device='cuda:0')
+self.jj  tensor([0, 0, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2, 0, 1, 2, 0, 1, 2, 3, 3, 3, 3, 1, 2, 3, 1, 2, 3, 4, 4, 4, 4], device='cuda:0')
+self.kk  tensor([0, 1, 0, 1, 2, 2, 3, 3, 0, 1, 2, 3, 4, 4, 4, 5, 5, 5, 2, 3, 4, 5, 6, 6, 6, 7, 7, 7, 4, 5, 6, 7], device='cuda:0')

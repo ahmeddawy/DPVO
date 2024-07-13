@@ -236,7 +236,6 @@ class DPVO:
         - Find the correlation of feature maps of patches[ii1] and the feature map of frame_jj1 around coords, with window size =3
         -- coords are the projection of patches[ii1]  to frame jj1
         '''
-
         """
             - self.gmap  [1, 32 * num_patches_per_frame, 128, 3, 3] -> [batch_size, total number of patches in the memeroy window, channels , patch width, patch height]
             - self.pyramid[0]  [1, 32 , 128, 132, 240] -> [batch_size, total number of frames in the memeroy window, channels , width, height]
@@ -246,10 +245,9 @@ class DPVO:
         
         """
         # Size [1,len(ii),7,7,3,3] -> Size[1,Num of Patches to compute coo , 7,7,3,3]
-        
+
         corr1 = altcorr.corr(self.gmap, self.pyramid[0], coords / 1, ii1, jj1,
                              3)
-
 
         # Size [1,len(ii),7,7,3,3]
         corr2 = altcorr.corr(self.gmap, self.pyramid[1], coords / 4, ii1, jj1,
@@ -327,14 +325,16 @@ class DPVO:
             corr = self.corr(coords, indicies=(kk, jj))
 
             # Get the context feature maps of patches[kk]
-            # self.imap [1,memory window x number of patches per frame, 384 ] -> contains patches context feature maps  
+            # self.imap [1,memory window x number of patches per frame, 384 ] -> contains patches context feature maps
             # ctx [1,  number of patches per frame , 384] -> contains patches_kk context feature maps
             ctx = self.imap[:, kk % (self.M * self.mem)]
+
             net, (delta, weight, _) = \
                 self.network.update(net, ctx, corr, None, ii, jj, kk)
+
+            # net size [batch_size , number of patches per frame,384]
             # delta size is [batch_size , number of patches per frame , 2 ]
             # weight size is [batch_size , number of patches per frame , 2 ]
-
             """ 1- Calculate the norm of the delta returns along dim=-1, which means calculate the norm of the returned delta features for each patch
                 2- Sort the values and Get the median of all the values"""
 
@@ -357,25 +357,38 @@ class DPVO:
 
     def keyframe(self):
 
+        # self.cfg.KEYFRAME_INDEX = 4
+
         i = self.n - self.cfg.KEYFRAME_INDEX - 1
         j = self.n - self.cfg.KEYFRAME_INDEX + 1
-        m = self.motionmag(i, j) + self.motionmag(j, i)
+        m = self.motionmag(i, j) + self.motionmag(j, i) # Get the motion from i -> j and from i <- j
 
-        if m / 2 < self.cfg.KEYFRAME_THRESH:
-            k = self.n - self.cfg.KEYFRAME_INDEX
+        
+        if m / 2 < self.cfg.KEYFRAME_THRESH: # Get the average of this motion
+            # the current frame is a candidate for removal
+            k = self.n - self.cfg.KEYFRAME_INDEX # the index of the frame that is candidtae for removal (it is the in between i and j )
+            
+            #t0 and t1 are the timestamps of the frames k-1 and k, respectively.
             t0 = self.tstamps_[k - 1].item()
             t1 = self.tstamps_[k].item()
-
+            
+            # dP is the relative pose transformation between frames k and k-1
             dP = SE3(self.poses_[k]) * SE3(self.poses_[k - 1]).inv()
-            self.delta[t1] = (t0, dP)
-
+            self.delta[t1] = (t0, dP)# store the relative pose transformation and the corresponding timestamp
+            
+            # Get the indices at which the frame index = the rquired to be removed index
             to_remove = (self.ii == k) | (self.jj == k)
             self.remove_factors(to_remove)
-
+             
+            #This mask identifies the patches whose source frames come after the removed frame k, So correct their indices by removing the M 
             self.kk[self.ii > k] -= self.M
+            #This mask identifies the source frames whose come after the removed frame k, So correct their indices by removing 1
             self.ii[self.ii > k] -= 1
+            #Adjusts the frame indices in self.jj to account for the removed frame, ensuring subsequent frames are correctly re-indexed.            
             self.jj[self.jj > k] -= 1
+            
 
+            # Update all the attributes of the class accordingly
             for i in range(k, self.n - 1):
                 self.tstamps_[i] = self.tstamps_[i + 1]
                 self.colors_[i] = self.colors_[i + 1]
@@ -392,23 +405,44 @@ class DPVO:
 
             self.n -= 1
             self.m -= self.M
-
+        # Remove frames that their indices are outdated
+        # 1- self.ix[self.kk] -> Get the source frame indices of the current patches
+        # 2- Compare the source frame indices with (self.n - self.cfg.REMOVAL_WINDOW)
+        # 3- Get the True masks for source frames where they are < (self.n - self.cfg.REMOVAL_WINDOW)
+        # --> Ex if self.n = 30 and self.cfg.REMOVAL_WINDOW = 22
+        # -- any frame index < 8 will be removed with its patches
         to_remove = self.ix[self.kk] < self.n - self.cfg.REMOVAL_WINDOW
         self.remove_factors(to_remove)
 
     def update(self):
         with Timer("other", enabled=self.enable_timing):
+            '''
+               In this function we do the exact same as before the init, except we pass the full graph (self.ii , self.jj, self,kk) 
+               instead of passing the patches of the prev frame only.
+               Thus all the shapes will represent the shape of the graph (ii.shape)
+            '''
+            #-> Size[batch_size, ii.shape , num_channels , patch_width , patch_height] = [1,ii.shape , 2, 3 ,3 ]
+            # contains the reprojected coordinates of patches (self.kk) from their source frames (self.ii) to their target frames (self.jj)
             coords = self.reproject()
-
             with autocast(enabled=True):
+                #-> Size[batch_size, ii.shape , num_channels] = [1,ii.shape , 882]
                 corr = self.corr(coords)
+                #-> Size [batch_size, ii.shape ,num_channels ] = [1,ii.shape , 384]
                 ctx = self.imap[:, self.kk % (self.M * self.mem)]
+
+                # self.net -> Size [batch_size , ii.shape,384]
+                # delta -> Size [batch_size , ii.shape , 2 ]
+                # weight -> Size [batch_size , ii.shape , 2 ]
                 self.net, (delta, weight, _) = \
                     self.network.update(self.net, ctx, corr, None, self.ii, self.jj, self.kk)
 
             lmbda = torch.as_tensor([1e-4], device="cuda")
             weight = weight.float()
-            target = coords[..., self.P // 2, self.P // 2] + delta.float()
+
+            # This operation -coords[..., self.P // 2, self.P // 2]- reduces the last two dimensions (patch grid) to a single coordinate,
+            # giving the central coordinate of each patch.
+            target = coords[..., self.P // 2, self.P // 2] + delta.float() # -> Size [batch_size , ii.shape , 2]
+
 
         with Timer("BA", enabled=self.enable_timing):
             t0 = self.n - self.cfg.OPTIMIZATION_WINDOW if self.is_initialized else 1
@@ -594,10 +628,11 @@ class DPVO:
         self.m += self.M  # increase the number of patches in the graph by 96
 
         print("n ", self.n)
-
+        print("self.ii b", self.ii.shape)
         # relative pose
         self.append_factors(*self.__edges_forw())
         self.append_factors(*self.__edges_back())
+        print("self.ii a", self.ii.shape)
 
         if self.n == 8 and not self.is_initialized:
             self.is_initialized = True
