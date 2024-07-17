@@ -33,10 +33,6 @@ def run(cfg,
     slam = None
     queue = Queue(maxsize=8)
 
-    human_segmentor = YOLO('yolov8n-seg.pt')
-    human_segmentor.to(torch.device("cpu"))
-    kernel = np.ones((41, 41), np.uint8)
-
     if os.path.isdir(imagedir):
         reader = Process(target=image_stream,
                          args=(queue, imagedir, calib, stride, skip))
@@ -49,8 +45,6 @@ def run(cfg,
     while 1:
         torch.cuda.empty_cache()
         (t, image, intrinsics) = queue.get()
-
-        # all_human_mask_pixels = get_human_masks(image)
 
         if t < 0: break
         # the raw input image is resized to its 0.5 scale in video_stream
@@ -70,9 +64,8 @@ def run(cfg,
         intrinsics = intrinsics.cuda()
 
         with Timer("SLAM", enabled=timeit):
-            # slam(t, image, intrinsics,
-            #      human_masks=all_human_mask_pixels)  # calling  __call__
-            slam(t, image, intrinsics)  # calling  __call_
+            slam(t, image, intrinsics)  # calling  __call__
+            # slam(t, image, intrinsics)  # calling  __call_
     for _ in range(12):
         slam.update()
 

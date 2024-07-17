@@ -121,11 +121,21 @@ class Update(nn.Module):
             -- Thus, there will be no neighbors.
             -- mask_ix * net[:, ix]-> and  mask_jx * net[:, jx] are all zeros 
         '''
+
         ix, jx = fastba.neighbors(
-            kk,
-            jj)  # --> This might contains the 1D convolution  from the paper
-        mask_ix = (ix >= 0).float().reshape(1, -1, 1)
-        mask_jx = (jx >= 0).float().reshape(1, -1, 1)
+            kk, jj)  # --> This contains the 1D convolution  from the paper
+
+        mask_ix = (ix >= 0).float().reshape(
+            1, -1, 1
+        )  #reshapes the masks to have the shape [1, length_of_valid_indices, 1].
+        mask_jx = (jx >= 0).float().reshape(
+            1, -1, 1
+        )  #reshapes the masks to have the shape [1, length_of_valid_indices, 1].
+        '''
+           (mask_ix * net[:, ix]) -> From the net state, select the states of the valid previous neighbors. For the not valid previous neighbors,
+           their contribution will be suppressed to zero by the mask 
+        
+        '''
         net = net + self.c1(mask_ix * net[:, ix])
         net = net + self.c2(mask_jx * net[:, jx])
         #-------------------------------------------------------------------------------------------------------#

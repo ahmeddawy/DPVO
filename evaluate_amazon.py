@@ -6,6 +6,7 @@ import datetime
 import numpy as np
 import os.path as osp
 import pandas as pd
+import math
 
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
@@ -121,9 +122,14 @@ def get_ref_traj(shot_dir):
     cameras_dict = pd.read_pickle(camerasdir)
     sorted_cameras_dict = dict(sorted(cameras_dict.items()))
 
-    traj_ref_np = np.zeros((len(sorted_cameras_dict), 7))
+    # traj_ref_np = np.zeros((len(sorted_cameras_dict), 7))
+    # Adjust initialization to account for stride
+    traj_ref_np_len = math.ceil(len(sorted_cameras_dict) / STRIDE)
+    traj_ref_np = np.zeros((traj_ref_np_len, 7))
+    # for timestamp, (key, value) in enumerate(sorted_cameras_dict.items())[::STRIDE]:
+    for timestamp, (key, value) in enumerate(
+            sorted(sorted_cameras_dict.items())[::STRIDE]):
 
-    for timestamp, (key, value) in enumerate(sorted_cameras_dict.items()):
         v2c = value['v2c']
         rotation_matrix = R.from_matrix(v2c[:3, :3])
         translation = v2c[:3, 3]
@@ -154,30 +160,25 @@ def video_iterator(shot_dir, ext=".jpg", preload=True):
         cx = camera_intrins[0, 2]
         cy = camera_intrins[1, 2]
         intrinsics = torch.as_tensor([fx, fy, cx, cy])
-        data_list.append((image, intrinsics,image_numpy))
+        data_list.append((image, intrinsics, image_numpy))
 
     if len(data_list) == 0: raise Exception("Failed to read input.")
 
-    for (image, intrinsics,image_numpy) in data_list:
-        yield image.cuda(), intrinsics.cuda(),image_numpy
+    for (image, intrinsics, image_numpy) in data_list:
+        yield image.cuda(), intrinsics.cuda(), image_numpy
 
 
 @torch.no_grad()
 def run(imagedir, cfg, network, viz=False):
     slam = DPVO(cfg, network, ht=720, wd=1280, viz=viz)
 
-    for t, (image, intrinsics,image_numpy) in enumerate(video_iterator(imagedir)):
+    for t, (image, intrinsics,
+            image_numpy) in enumerate(video_iterator(imagedir)):
         if viz:
             show_image(image, 1)
 
-        all_human_mask_pixels = None
-        if cfg.EXCLUDE_HUMAN:
-            all_human_mask_pixels = get_human_masks(image_numpy)
-
-
-
-        with Timer("SLAM", enabled=False):
-            slam(t, image, intrinsics,all_human_mask_pixels)
+        with Timer("SLAM", enabled=viz):
+            slam(t, image, intrinsics)
 
     for _ in range(12):
         slam.update()
@@ -231,7 +232,7 @@ def evaluate(config,
 
     for i, scene in enumerate(scenes):
         scene_path = os.path.join(
-            "/home/dawy/Rembrand/moving_cam/dataset/small_baseline_dataset",
+            "/home/oem/Rembrand/moving_camera/datasets/small_baseline_dataset",
             scene)
         shots = os.listdir(scene_path)
         for s, shot in enumerate(shots):
@@ -241,19 +242,22 @@ def evaluate(config,
                 shot_path = os.path.join(scene_path, shot)
 
                 traj_ref = get_ref_traj(shot_path)
+                torch.cuda.empty_cache()
                 traj_est, tstamps = run(shot_path, config, net)
-                # ate_score = ate(traj_ref, traj_est, tstamps)
+                torch.cuda.empty_cache()
+                print("---->> shot : ", shot)
 
-                # shot_results.append(ate_score)
-                # if plot:
-                #     Path("AMAZON_trajectory_plots").mkdir(exist_ok=True)
-                #     plot_trajectory(
-                #         (traj_est, tstamps), (traj_ref, tstamps),
-                #         f"AMAZON {shot.replace('_', ' ')} Trial #{j+1} (ATE: {ate_score:.03f})",
-                #         f"AMAZON_trajectory_plots/AMAZON_{scene}_{shot}_Trial{j+1:02d}.pdf",
-                #         align=True,
-                #         correct_scale=True)
+                # # shot_results.append(ate_score)
+                if plot:
+                    ate_score = ate(traj_ref, traj_est, tstamps)
 
+                    Path("AMAZON_trajectory_plots").mkdir(exist_ok=True)
+                    plot_trajectory(
+                        (traj_est, tstamps), (traj_ref, tstamps),
+                        f"AMAZON {shot.replace('_', ' ')} Trial #{j+1} (ATE: {ate_score:.03f})",
+                        f"AMAZON_trajectory_plots/AMAZON_{scene}_{shot}_Trial{j+1:02d}.pdf",
+                        align=True,
+                        correct_scale=True)
                 if save:
                     Path("AMAZON_saved_trajectories").mkdir(exist_ok=True)
                     save_trajectory_tum_format((

@@ -4,6 +4,9 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 
+import matplotlib
+from depth_anything_v2.dpt import DepthAnythingV2
+
 all_times = []
 
 
@@ -96,13 +99,11 @@ def flatmeshgrid(*args, **kwargs):
     return (x.reshape(-1) for x in grid)
 
 
-def get_human_masks(image):
-    human_segmentor = YOLO('yolov8x-seg.pt')
-    # human_segmentor.to(torch.device("cpu"))
+def get_human_masks(image, human_segmentor):
     kernel = np.ones((21, 21), np.uint8)
     all_human_mask_pixels = None
     if image is not None:
-        human_mask_results = human_segmentor(image,conf=0.5)
+        human_mask_results = human_segmentor(image, conf=0.5, verbose=False , device='cpu')
         human_mask_pixels = []
 
         # Process each result
@@ -131,3 +132,26 @@ def get_human_masks(image):
         all_human_mask_pixels = np.vstack(
             human_mask_pixels) if human_mask_pixels else np.array([])
     return all_human_mask_pixels
+
+
+def get_disparity(image, depth_anything):
+    # input_size = 518
+    # depth = depth_anything.infer_image(image, input_size)
+    # depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+    # min_depth_threshold = 1e-6
+    # depth[depth < min_depth_threshold] = min_depth_threshold
+    # disparity_map = (1 * 1) / depth
+    # depth = depth.astype(np.uint8)
+    # depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
+    # disparity_map = disparity_map.astype(np.float32)
+
+    depth = depth_anything.infer_image(
+        image)  # HxW depth map in meters in numpy
+
+    depth[depth < 0.01] = np.mean(depth)
+
+    disparity_map = (1 * 1) / depth
+
+    depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
+
+    return depth, disparity_map

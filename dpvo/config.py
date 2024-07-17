@@ -25,5 +25,7 @@ _C.MOTION_DAMPING = 0.5
 _C.MIXED_PRECISION = True
 
 _C.EXCLUDE_HUMAN = True
+_C.USE_DEPTH = True
 
 cfg = _C
+

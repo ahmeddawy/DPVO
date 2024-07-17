@@ -29,6 +29,39 @@ class DPVO:
     def __init__(self, cfg, network, ht=480, wd=640, viz=False):
         torch.cuda.empty_cache()
         self.cfg = cfg
+
+        self.human_segmentor = None
+        self.depth_anything = None
+
+        if self.cfg.EXCLUDE_HUMAN:
+            self.human_segmentor = YOLO('yolov8x-seg.pt')
+
+        if self.cfg.USE_DEPTH:
+
+            DEVICE = 'cuda' if torch.cuda.is_available(
+            ) else 'mps' if torch.backends.mps.is_available() else 'cpu'
+            # DEVICE = 'cpu'
+            depth_model_configs = {
+                'vitl': {
+                    'encoder': 'vitl',
+                    'features': 256,
+                    'out_channels': [256, 512, 1024, 1024]
+                }
+            }
+
+            encoder = 'vitl'  # or 'vits', 'vitb'
+            dataset = 'hypersim'  # 'hypersim' for indoor model, 'vkitti' for outdoor model
+            max_depth = 20  # 20 for indoor model, 80 for outdoor model
+
+            self.depth_anything = DepthAnythingV2(
+                **{
+                    **depth_model_configs[encoder], 'max_depth': max_depth
+                })
+            self.depth_anything.load_state_dict(
+                torch.load(f'depth_anything_v2_metric_{dataset}_{encoder}.pth',
+                           map_location='cpu'))
+            self.depth_anything.to(DEVICE).eval()
+
         self.load_weights(network)  # load dpvo.pt
         self.is_initialized = False
         self.enable_timing = False
@@ -171,9 +204,21 @@ class DPVO:
         from dpviewer import Viewer
 
         intrinsics_ = torch.zeros(1, 4, dtype=torch.float32, device="cuda")
+        if self.cfg.USE_DEPTH:
+            image_ = torch.zeros(self.ht,
+                                 self.wd * 2,
+                                 3,
+                                 dtype=torch.uint8,
+                                 device="cpu")
+        else:
+            image_ = torch.zeros(self.ht,
+                                 self.wd,
+                                 3,
+                                 dtype=torch.uint8,
+                                 device="cpu")
 
-        self.viewer = Viewer(self.image_, self.poses_, self.points_,
-                             self.colors_, intrinsics_)
+        self.viewer = Viewer(image_, self.poses_, self.points_, self.colors_,
+                             intrinsics_)
 
     @property
     def poses(self):
@@ -357,60 +402,61 @@ class DPVO:
 
     def keyframe(self):
 
-        # self.cfg.KEYFRAME_INDEX = 4
+        # # self.cfg.KEYFRAME_INDEX = 4
 
-        i = self.n - self.cfg.KEYFRAME_INDEX - 1
-        j = self.n - self.cfg.KEYFRAME_INDEX + 1
-        m = self.motionmag(i, j) + self.motionmag(j, i) # Get the motion from i -> j and from i <- j
+        # i = self.n - self.cfg.KEYFRAME_INDEX - 1
+        # j = self.n - self.cfg.KEYFRAME_INDEX + 1
+        # m = self.motionmag(i, j) + self.motionmag(
+        #     j, i)  # Get the motion from i -> j and from i <- j
 
-        
-        if m / 2 < self.cfg.KEYFRAME_THRESH: # Get the average of this motion
-            # the current frame is a candidate for removal
-            k = self.n - self.cfg.KEYFRAME_INDEX # the index of the frame that is candidtae for removal (it is the in between i and j )
-            
-            #t0 and t1 are the timestamps of the frames k-1 and k, respectively.
-            t0 = self.tstamps_[k - 1].item()
-            t1 = self.tstamps_[k].item()
-            
-            # dP is the relative pose transformation between frames k and k-1
-            dP = SE3(self.poses_[k]) * SE3(self.poses_[k - 1]).inv()
-            self.delta[t1] = (t0, dP)# store the relative pose transformation and the corresponding timestamp
-            
-            # Get the indices at which the frame index = the rquired to be removed index
-            to_remove = (self.ii == k) | (self.jj == k)
-            self.remove_factors(to_remove)
-             
-            #This mask identifies the patches whose source frames come after the removed frame k, So correct their indices by removing the M 
-            self.kk[self.ii > k] -= self.M
-            #This mask identifies the source frames whose come after the removed frame k, So correct their indices by removing 1
-            self.ii[self.ii > k] -= 1
-            #Adjusts the frame indices in self.jj to account for the removed frame, ensuring subsequent frames are correctly re-indexed.            
-            self.jj[self.jj > k] -= 1
-            
+        # if m / 2 < self.cfg.KEYFRAME_THRESH:  # Get the average of this motion
+        #     # the current frame is a candidate for removal
+        #     k = self.n - self.cfg.KEYFRAME_INDEX  # the index of the frame that is candidtae for removal (it is the in between i and j )
 
-            # Update all the attributes of the class accordingly
-            for i in range(k, self.n - 1):
-                self.tstamps_[i] = self.tstamps_[i + 1]
-                self.colors_[i] = self.colors_[i + 1]
-                self.poses_[i] = self.poses_[i + 1]
-                self.patches_[i] = self.patches_[i + 1]
-                self.intrinsics_[i] = self.intrinsics_[i + 1]
+        #     #t0 and t1 are the timestamps of the frames k-1 and k, respectively.
+        #     t0 = self.tstamps_[k - 1].item()
+        #     t1 = self.tstamps_[k].item()
 
-                self.imap_[i % self.mem] = self.imap_[(i + 1) % self.mem]
-                self.gmap_[i % self.mem] = self.gmap_[(i + 1) % self.mem]
-                self.fmap1_[0, i % self.mem] = self.fmap1_[0,
-                                                           (i + 1) % self.mem]
-                self.fmap2_[0, i % self.mem] = self.fmap2_[0,
-                                                           (i + 1) % self.mem]
+        #     # dP is the relative pose transformation between frames k and k-1
+        #     dP = SE3(self.poses_[k]) * SE3(self.poses_[k - 1]).inv()
+        #     self.delta[t1] = (
+        #         t0, dP
+        #     )  # store the relative pose transformation and the corresponding timestamp
 
-            self.n -= 1
-            self.m -= self.M
-        # Remove frames that their indices are outdated
-        # 1- self.ix[self.kk] -> Get the source frame indices of the current patches
-        # 2- Compare the source frame indices with (self.n - self.cfg.REMOVAL_WINDOW)
-        # 3- Get the True masks for source frames where they are < (self.n - self.cfg.REMOVAL_WINDOW)
-        # --> Ex if self.n = 30 and self.cfg.REMOVAL_WINDOW = 22
-        # -- any frame index < 8 will be removed with its patches
+        #     # Get the indices at which the frame index = the rquired to be removed index
+        #     to_remove = (self.ii == k) | (self.jj == k)
+        #     self.remove_factors(to_remove)
+
+        #     #This mask identifies the patches whose source frames come after the removed frame k, So correct their indices by removing the M
+        #     self.kk[self.ii > k] -= self.M
+        #     #This mask identifies the source frames whose come after the removed frame k, So correct their indices by removing 1
+        #     self.ii[self.ii > k] -= 1
+        #     #Adjusts the frame indices in self.jj to account for the removed frame, ensuring subsequent frames are correctly re-indexed.
+        #     self.jj[self.jj > k] -= 1
+
+        #     # Update all the attributes of the class accordingly
+        #     for i in range(k, self.n - 1):
+        #         self.tstamps_[i] = self.tstamps_[i + 1]
+        #         self.colors_[i] = self.colors_[i + 1]
+        #         self.poses_[i] = self.poses_[i + 1]
+        #         self.patches_[i] = self.patches_[i + 1]
+        #         self.intrinsics_[i] = self.intrinsics_[i + 1]
+
+        #         self.imap_[i % self.mem] = self.imap_[(i + 1) % self.mem]
+        #         self.gmap_[i % self.mem] = self.gmap_[(i + 1) % self.mem]
+        #         self.fmap1_[0, i % self.mem] = self.fmap1_[0,
+        #                                                    (i + 1) % self.mem]
+        #         self.fmap2_[0, i % self.mem] = self.fmap2_[0,
+        #                                                    (i + 1) % self.mem]
+
+        #     self.n -= 1
+        #     self.m -= self.M
+        # # Remove frames that their indices are outdated
+        # # 1- self.ix[self.kk] -> Get the source frame indices of the current patches
+        # # 2- Compare the source frame indices with (self.n - self.cfg.REMOVAL_WINDOW)
+        # # 3- Get the True masks for source frames where they are < (self.n - self.cfg.REMOVAL_WINDOW)
+        # # --> Ex if self.n = 30 and self.cfg.REMOVAL_WINDOW = 22
+        # # -- any frame index < 8 will be removed with its patches
         to_remove = self.ix[self.kk] < self.n - self.cfg.REMOVAL_WINDOW
         self.remove_factors(to_remove)
 
@@ -441,8 +487,8 @@ class DPVO:
 
             # This operation -coords[..., self.P // 2, self.P // 2]- reduces the last two dimensions (patch grid) to a single coordinate,
             # giving the central coordinate of each patch.
-            target = coords[..., self.P // 2, self.P // 2] + delta.float() # -> Size [batch_size , ii.shape , 2]
-
+            target = coords[..., self.P // 2, self.P // 2] + delta.float(
+            )  # -> Size [batch_size , ii.shape , 2]
 
         with Timer("BA", enabled=self.enable_timing):
             t0 = self.n - self.cfg.OPTIMIZATION_WINDOW if self.is_initialized else 1
@@ -501,12 +547,29 @@ class DPVO:
                                          device="cuda"),
                             indexing='ij')
 
-    def __call__(self, tstamp, image, intrinsics, human_masks=None):
+    def __call__(self,
+                 tstamp,
+                 image,
+                 intrinsics,
+                 human_masks=None,
+                 disparity=None):
         """ track new frame """
 
-        viewer_image = image.detach().clone()
-        viewer_image = viewer_image.permute(1, 2, 0)
-        viewer_image_np = viewer_image.cpu().numpy()
+        image_np = image.detach().clone()
+        image_np = image_np.permute(1, 2, 0)
+        image_np = image_np.cpu().numpy()
+
+        viewer_image_np = image_np.copy()
+
+        if self.cfg.EXCLUDE_HUMAN:
+            human_masks = get_human_masks(image_np, self.human_segmentor)
+
+        if self.cfg.USE_DEPTH:
+            depth_np, disparity_np = get_disparity(image_np,
+                                                   self.depth_anything)
+            disparity = torch.from_numpy(disparity_np)
+            disparity = disparity[None, None].to('cuda')
+            # print("depth_np ",depth_np.shape)
 
         # Batch the first two dimensions of the image tensor to be [1,1,3,h,w], then Normalize to the range [-0.5, 0.5]
         image = 2 * (image[None, None] / 255.0) - 0.5
@@ -518,52 +581,62 @@ class DPVO:
             # 4- patches of the image centered around coords with added disparity Size([1, 96, 3, 3, 3])
             fmap, gmap, imap, patches, _, clr = \
                 self.network.patchify(image,
-                    patches_per_image=self.cfg.PATCHES_PER_FRAME,
+                    patches_per_image=self.cfg.PATCHES_PER_FRAME,disps=disparity,
                     gradient_bias=self.cfg.GRADIENT_BIAS,
                     return_color=True, human_masks=human_masks)
 
-        patches_np = patches.squeeze().cpu().numpy()
-        x_coords = patches_np[:, 0, :, :].reshape(-1, 3 * 3)
-        y_coords = patches_np[:, 1, :, :].reshape(-1, 3 * 3)
-        x_min = (x_coords.min(axis=1)) * 4
-        x_max = (x_coords.max(axis=1)) * 4
-        y_min = (y_coords.min(axis=1)) * 4
-        y_max = (y_coords.max(axis=1)) * 4
+        if self.cfg.EXCLUDE_HUMAN:
+            patches_np = patches.squeeze().cpu().numpy()
+            x_coords = patches_np[:, 0, :, :].reshape(-1, 3 * 3)
+            y_coords = patches_np[:, 1, :, :].reshape(-1, 3 * 3)
+            x_min = (x_coords.min(axis=1)) * 4
+            x_max = (x_coords.max(axis=1)) * 4
+            y_min = (y_coords.min(axis=1)) * 4
+            y_max = (y_coords.max(axis=1)) * 4
 
-        # Draw rectangles on the image
-        for i in range(len(x_min)):
-            start_point = (int(x_min[i]), int(y_min[i]))  # Top-left corner
-            end_point = (int(x_max[i]), int(y_max[i]))  # Bottom-right corner
+            # Draw rectangles on the image
+            for i in range(len(x_min)):
+                start_point = (int(x_min[i]), int(y_min[i]))  # Top-left corner
+                end_point = (int(x_max[i]), int(y_max[i])
+                             )  # Bottom-right corner
 
-            rect_points = np.array(
-                [
-                    [start_point[0], start_point[1]],  # Top-left
-                    [end_point[0], start_point[1]],  # Top-right
-                    [end_point[0], end_point[1]],  # Bottom-right
-                    [start_point[0], end_point[1]]  # Bottom-left
-                ],
-                dtype=np.int32)
-            color = (0, 0, 0)
-            cv2.fillPoly(viewer_image_np, [rect_points], color)
+                rect_points = np.array(
+                    [
+                        [start_point[0], start_point[1]],  # Top-left
+                        [end_point[0], start_point[1]],  # Top-right
+                        [end_point[0], end_point[1]],  # Bottom-right
+                        [start_point[0], end_point[1]]  # Bottom-left
+                    ],
+                    dtype=np.int32)
+                color = (0, 0, 0)
+                cv2.fillPoly(viewer_image_np, [rect_points], color)
 
-        if human_masks is not None:
-            # Populate the mask overlay with the mask pixels
-            human_mask_overlay = np.zeros(viewer_image_np.shape[:2],
-                                          dtype=np.uint8)
-            for pixel in human_masks:
-                human_mask_overlay[pixel[0], pixel[1]] = 255
+            if human_masks is not None:
+                # Populate the mask overlay with the mask pixels
+                human_mask_overlay = np.zeros(viewer_image_np.shape[:2],
+                                              dtype=np.uint8)
+                for pixel in human_masks:
+                    human_mask_overlay[pixel[0], pixel[1]] = 255
 
-            # Create a colored version of the mask overlay
-            colored_mask_overlay = np.zeros_like(viewer_image_np)
-            colored_mask_overlay[human_mask_overlay == 255] = [
-                0, 255, 0
-            ]  # Green color for the mask
+                # Create a colored version of the mask overlay
+                colored_mask_overlay = np.zeros_like(viewer_image_np)
+                colored_mask_overlay[human_mask_overlay == 255] = [
+                    0, 255, 0
+                ]  # Green color for the mask
 
-            # Overlay the viewer image and the colored human mask
-            viewer_image_np = cv2.addWeighted(viewer_image_np, 1,
-                                              colored_mask_overlay, 0.5, 0)
+                # Overlay the viewer image and the colored human mask
+                viewer_image_np = cv2.addWeighted(viewer_image_np, 1,
+                                                  colored_mask_overlay, 0.5, 0)
 
-            # Transform the numpy image to Tensor again
+        if self.cfg.USE_DEPTH:
+            # cv2.imwrite("./depth.jpg",)
+            # Stack images horizontally
+            # viewer_image_np = np.hstack((viewer_image_np, depth_np*255/depth_np.max()))
+            depth_np = depth_np * 255 / depth_np.max()
+            depth_np = depth_np.astype(np.uint8)
+
+            viewer_image_np = np.hstack((viewer_image_np, depth_np))
+
         viewer_image = torch.from_numpy(viewer_image_np)
         viewer_image = viewer_image.permute(2, 0, 1)
 
@@ -620,19 +693,19 @@ class DPVO:
 
         self.counter += 1
         if self.n > 0 and not self.is_initialized:
-            if self.motion_probe() < 2.0:
+            if self.motion_probe() < 0.0:
                 self.delta[self.counter - 1] = (self.counter - 2, Id[0])
                 return
 
         self.n += 1  # increase the number of frames in the graph by 1
         self.m += self.M  # increase the number of patches in the graph by 96
 
-        print("n ", self.n)
-        print("self.ii b", self.ii.shape)
+        # print("n ", self.n)
+        # print("self.ii b", self.ii.shape)
         # relative pose
         self.append_factors(*self.__edges_forw())
         self.append_factors(*self.__edges_back())
-        print("self.ii a", self.ii.shape)
+        # print("self.ii a", self.ii.shape)
 
         if self.n == 8 and not self.is_initialized:
             self.is_initialized = True
@@ -641,5 +714,6 @@ class DPVO:
                 self.update()
 
         elif self.is_initialized:
+            # for i in range (4):
             self.update()
             self.keyframe()
