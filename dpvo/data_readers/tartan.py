@@ -81,7 +81,7 @@ class TartanAir(RGBDDataset):
 
     #     return any(x in scene for x in test_split)
     @staticmethod
-    def is_test_scene(scene, test_split):
+    def is_test_scene(scene):
         def modify_path(path):
             parts = path.split('/')
             return '/'.join(parts[1:])
