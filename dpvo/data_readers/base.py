@@ -61,8 +61,8 @@ class RGBDDataset(data.Dataset):
         samples_counter = 0
         for scene in self.scene_info:
             parts = scene.split('/')
-            scene = '/'.join(parts[1:])
-            if not self.__class__.is_test_scene(scene):
+            scene_ = '/'.join(parts[1:])
+            if not self.__class__.is_test_scene(scene_):
                 samples_counter = samples_counter + 1
                 graph = self.scene_info[scene]['graph']
                 for i in graph:
