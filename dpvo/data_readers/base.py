@@ -50,9 +50,9 @@ class RGBDDataset(data.Dataset):
             os.mkdir(osp.join(cur_path, 'cache'))
 
 
-        # self.scene_info = \
-        #     # pickle.load(open('datasets/TartanAir.pickle', 'rb'))[0]
-        self.scene_info =  open('/mnt/data/visual_slam/tartanair/scenes.txt', 'r')
+        self.scene_info = \
+            pickle.load(open('datasets/TartanAir.pickle', 'rb'))[0]
+        # self.scene_info =  open('/mnt/data/visual_slam/tartanair/scenes.txt', 'r')
 
         self._build_dataset_index()
 
@@ -60,8 +60,9 @@ class RGBDDataset(data.Dataset):
         self.dataset_index = []
         samples_counter = 0
         for scene in self.scene_info:
-            if not self.__class__.is_test_scene(
-                    scene) and self.__class__.is_scene_found(scene):
+            parts = scene.split('/')
+            scene = '/'.join(parts[1:])
+            if not self.__class__.is_test_scene(scene):
                 samples_counter = samples_counter + 1
                 graph = self.scene_info[scene]['graph']
                 for i in graph:

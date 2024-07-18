@@ -103,7 +103,7 @@ def get_human_masks(image, human_segmentor):
     kernel = np.ones((21, 21), np.uint8)
     all_human_mask_pixels = None
     if image is not None:
-        human_mask_results = human_segmentor(image, conf=0.5, verbose=False , device='cpu')
+        human_mask_results = human_segmentor(image, conf=0.5, verbose=False )
         human_mask_pixels = []
 
         # Process each result
