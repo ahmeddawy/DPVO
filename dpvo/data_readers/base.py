@@ -50,11 +50,11 @@ class RGBDDataset(data.Dataset):
             os.mkdir(osp.join(cur_path, 'cache'))
 
 
-        self.scene_info = \
-            pickle.load(open('datasets/TartanAir.pickle', 'rb'))[0]
-        # self.scene_info =  open('/mnt/data/visual_slam/tartanair/scenes.txt', 'r')
+        # self.scene_info = \
+        #     pickle.load(open('datasets/TartanAir.pickle', 'rb'))[0]
+        # # self.scene_info =  open('/mnt/data/visual_slam/tartanair/scenes.txt', 'r')
 
-        self._build_dataset_index()
+        # self._build_dataset_index()
 
     def _build_dataset_index(self):
         self.dataset_index = []

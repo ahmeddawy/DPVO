@@ -256,6 +256,8 @@ class DPVO:
         self.traj = {}
         for i in range(self.n):
             self.traj[self.tstamps_[i].item()] = self.poses_[i]
+        print("self.traj ", len(self.traj))
+        print("self.counter ", self.counter)
 
         poses = [self.get_pose(t) for t in range(self.counter)]
         poses = lietorch.stack(poses, dim=0)
@@ -267,6 +269,42 @@ class DPVO:
             self.viewer.join()
 
         return poses, tstamps
+
+    # def get_pose(self, t):
+    #     if t in self.traj:
+    #         return SE3(self.traj[t])
+
+    #     t0, dP = self.delta[t]
+    #     return dP * self.get_pose(t0)
+
+    # def terminate(self):
+    #     """ interpolate missing poses """
+    #     self.traj = {}
+    #     for i in range(self.n):
+    #         self.traj[self.tstamps_[i].item()] = self.poses_[i]
+
+    #     tlist = []
+    #     for i in range(self.n):
+    #         # print("self.tstamps_ ", self.tstamps_[i])
+    #         # print("self.traj ", self.traj[self.tstamps_[i].item()])
+    #         tlist.append(self.tstamps_[i].item())
+        
+        
+        
+        
+    #     poses = [SE3(self.traj[t]) for t in tlist]
+    #     poses = lietorch.stack(poses, dim=0)
+    #     poses = poses.inv().data.cpu().numpy()
+        
+        
+        
+    #     tstamps = np.array(
+    #         tlist, dtype=np.float64)  # float64 to fix TUM timestamp error
+
+    #     if self.viewer is not None:
+    #         self.viewer.join()
+
+    #     return poses, tstamps
 
     def corr(self, coords, indicies=None):
         """ local correlation volume """
@@ -402,61 +440,62 @@ class DPVO:
 
     def keyframe(self):
 
-        # # self.cfg.KEYFRAME_INDEX = 4
+        # self.cfg.KEYFRAME_INDEX = 4
 
-        # i = self.n - self.cfg.KEYFRAME_INDEX - 1
-        # j = self.n - self.cfg.KEYFRAME_INDEX + 1
-        # m = self.motionmag(i, j) + self.motionmag(
-        #     j, i)  # Get the motion from i -> j and from i <- j
+        i = self.n - self.cfg.KEYFRAME_INDEX - 1
+        j = self.n - self.cfg.KEYFRAME_INDEX + 1
 
-        # if m / 2 < self.cfg.KEYFRAME_THRESH:  # Get the average of this motion
-        #     # the current frame is a candidate for removal
-        #     k = self.n - self.cfg.KEYFRAME_INDEX  # the index of the frame that is candidtae for removal (it is the in between i and j )
+        # Get the motion from i -> j and from i <- j
+        m = self.motionmag(i, j) + self.motionmag(j, i)
 
-        #     #t0 and t1 are the timestamps of the frames k-1 and k, respectively.
-        #     t0 = self.tstamps_[k - 1].item()
-        #     t1 = self.tstamps_[k].item()
+        if m / 2 < self.cfg.KEYFRAME_THRESH:  # Get the average of this motion
+            # the current frame is a candidate for removal
+            k = self.n - self.cfg.KEYFRAME_INDEX  # the index of the frame that is candidtae for removal (it is the in between i and j )
 
-        #     # dP is the relative pose transformation between frames k and k-1
-        #     dP = SE3(self.poses_[k]) * SE3(self.poses_[k - 1]).inv()
-        #     self.delta[t1] = (
-        #         t0, dP
-        #     )  # store the relative pose transformation and the corresponding timestamp
+            #t0 and t1 are the timestamps of the frames k-1 and k, respectively.
+            t0 = self.tstamps_[k - 1].item()
+            t1 = self.tstamps_[k].item()
 
-        #     # Get the indices at which the frame index = the rquired to be removed index
-        #     to_remove = (self.ii == k) | (self.jj == k)
-        #     self.remove_factors(to_remove)
+            # dP is the relative pose transformation between frames k and k-1
+            dP = SE3(self.poses_[k]) * SE3(self.poses_[k - 1]).inv()
+            self.delta[t1] = (
+                t0, dP
+            )  # store the relative pose transformation and the corresponding timestamp
 
-        #     #This mask identifies the patches whose source frames come after the removed frame k, So correct their indices by removing the M
-        #     self.kk[self.ii > k] -= self.M
-        #     #This mask identifies the source frames whose come after the removed frame k, So correct their indices by removing 1
-        #     self.ii[self.ii > k] -= 1
-        #     #Adjusts the frame indices in self.jj to account for the removed frame, ensuring subsequent frames are correctly re-indexed.
-        #     self.jj[self.jj > k] -= 1
+            # Get the indices at which the frame index = the rquired to be removed index
+            to_remove = (self.ii == k) | (self.jj == k)
+            self.remove_factors(to_remove)
 
-        #     # Update all the attributes of the class accordingly
-        #     for i in range(k, self.n - 1):
-        #         self.tstamps_[i] = self.tstamps_[i + 1]
-        #         self.colors_[i] = self.colors_[i + 1]
-        #         self.poses_[i] = self.poses_[i + 1]
-        #         self.patches_[i] = self.patches_[i + 1]
-        #         self.intrinsics_[i] = self.intrinsics_[i + 1]
+            #This mask identifies the patches whose source frames come after the removed frame k, So correct their indices by removing the M
+            self.kk[self.ii > k] -= self.M
+            #This mask identifies the source frames whose come after the removed frame k, So correct their indices by removing 1
+            self.ii[self.ii > k] -= 1
+            #Adjusts the frame indices in self.jj to account for the removed frame, ensuring subsequent frames are correctly re-indexed.
+            self.jj[self.jj > k] -= 1
 
-        #         self.imap_[i % self.mem] = self.imap_[(i + 1) % self.mem]
-        #         self.gmap_[i % self.mem] = self.gmap_[(i + 1) % self.mem]
-        #         self.fmap1_[0, i % self.mem] = self.fmap1_[0,
-        #                                                    (i + 1) % self.mem]
-        #         self.fmap2_[0, i % self.mem] = self.fmap2_[0,
-        #                                                    (i + 1) % self.mem]
+            # Update all the attributes of the class accordingly
+            for i in range(k, self.n - 1):
+                self.tstamps_[i] = self.tstamps_[i + 1]
+                self.colors_[i] = self.colors_[i + 1]
+                self.poses_[i] = self.poses_[i + 1]
+                self.patches_[i] = self.patches_[i + 1]
+                self.intrinsics_[i] = self.intrinsics_[i + 1]
 
-        #     self.n -= 1
-        #     self.m -= self.M
-        # # Remove frames that their indices are outdated
-        # # 1- self.ix[self.kk] -> Get the source frame indices of the current patches
-        # # 2- Compare the source frame indices with (self.n - self.cfg.REMOVAL_WINDOW)
-        # # 3- Get the True masks for source frames where they are < (self.n - self.cfg.REMOVAL_WINDOW)
-        # # --> Ex if self.n = 30 and self.cfg.REMOVAL_WINDOW = 22
-        # # -- any frame index < 8 will be removed with its patches
+                self.imap_[i % self.mem] = self.imap_[(i + 1) % self.mem]
+                self.gmap_[i % self.mem] = self.gmap_[(i + 1) % self.mem]
+                self.fmap1_[0, i % self.mem] = self.fmap1_[0,
+                                                           (i + 1) % self.mem]
+                self.fmap2_[0, i % self.mem] = self.fmap2_[0,
+                                                           (i + 1) % self.mem]
+
+            self.n -= 1
+            self.m -= self.M
+        # Remove frames that their indices are outdated
+        # 1- self.ix[self.kk] -> Get the source frame indices of the current patches
+        # 2- Compare the source frame indices with (self.n - self.cfg.REMOVAL_WINDOW)
+        # 3- Get the True masks for source frames where they are < (self.n - self.cfg.REMOVAL_WINDOW)
+        # --> Ex if self.n = 30 and self.cfg.REMOVAL_WINDOW = 22
+        # -- any frame index < 8 will be removed with its patches
         to_remove = self.ix[self.kk] < self.n - self.cfg.REMOVAL_WINDOW
         self.remove_factors(to_remove)
 
