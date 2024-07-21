@@ -98,7 +98,7 @@ class TartanAir(RGBDDataset):
         print("Building TartanAir dataset")
 
         scene_info = {}
-        scenes = glob.glob(osp.join(self.root, '*/*/'))
+        scenes = glob.glob(osp.join(self.root, '*/*/*/'))
         print("scenes ",scenes)
         for scene in tqdm(sorted(scenes)):
             images = sorted(glob.glob(osp.join(scene, 'image_left/*.png')))
