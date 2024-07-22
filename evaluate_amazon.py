@@ -7,6 +7,7 @@ import numpy as np
 import os.path as osp
 import pandas as pd
 import math
+import os.path
 
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
@@ -122,21 +123,30 @@ def get_ref_traj(shot_dir):
     cameras_dict = pd.read_pickle(camerasdir)
     sorted_cameras_dict = dict(sorted(cameras_dict.items()))
 
-    # traj_ref_np = np.zeros((len(sorted_cameras_dict), 7))
+    imagedir = os.path.join(shot_dir, "frames")
+    imfiles = glob.glob(osp.join(imagedir, "*{}".format(".jpg")))
+    imids = [im_id.split('.jpg')[0].split('_')[-1] for im_id in imfiles]
+
     # Adjust initialization to account for stride
-    traj_ref_np_len = math.ceil(len(sorted_cameras_dict) / STRIDE)
+    traj_ref_np_len = math.ceil(len(imids) / STRIDE)
     traj_ref_np = np.zeros((traj_ref_np_len, 7))
     # for timestamp, (key, value) in enumerate(sorted_cameras_dict.items())[::STRIDE]:
-    for timestamp, (key, value) in enumerate(
-            sorted(sorted_cameras_dict.items())[::STRIDE]):
+    timestamp = 0
+    for _, (key,
+            value) in enumerate(sorted(sorted_cameras_dict.items())[::STRIDE]):
+        if key in imids:
+            v2c = value['v2c']
+            rotation_matrix = R.from_matrix(v2c[:3, :3])
+            translation = v2c[:3, 3]
+            quaternion = rotation_matrix.as_quat()
+            value['tum'] = {
+                'quaternion': quaternion,
+                'translation': translation
+            }
+            traj_ref_np[timestamp][0:3] = translation
+            traj_ref_np[timestamp][3:] = quaternion
+            timestamp = timestamp + 1
 
-        v2c = value['v2c']
-        rotation_matrix = R.from_matrix(v2c[:3, :3])
-        translation = v2c[:3, 3]
-        quaternion = rotation_matrix.as_quat()
-        value['tum'] = {'quaternion': quaternion, 'translation': translation}
-        traj_ref_np[timestamp][0:3] = translation
-        traj_ref_np[timestamp][3:] = quaternion
     return traj_ref_np
 
 
@@ -229,7 +239,16 @@ def evaluate(config,
     print("scenes ", scenes)
 
     results = {}
+    # shot_path = '/home/oem/Rembrand/moving_camera/datasets/Amazon/small_baseline_dataset/Bosch07_EP01/Bosch07_01_SHOT_018'
+    # traj_ref = get_ref_traj(shot_path)
+    # print("traj_ref ", traj_ref.shape)
 
+    # torch.cuda.empty_cache()
+    # traj_est, tstamps = run(shot_path, config, net)
+    # torch.cuda.empty_cache()
+    # print("traj_est ", traj_est.shape)
+    # ate_score = ate(traj_ref, traj_est, tstamps)
+    # print("ate_score ", ate_score)
     for i, scene in enumerate(scenes):
         scene_path = os.path.join(
             "/home/oem/Rembrand/moving_camera/datasets/small_baseline_dataset",
@@ -241,15 +260,27 @@ def evaluate(config,
             for j in range(trials):
                 shot_path = os.path.join(scene_path, shot)
 
-                traj_ref = get_ref_traj(shot_path)
-                torch.cuda.empty_cache()
-                traj_est, tstamps = run(shot_path, config, net)
-                torch.cuda.empty_cache()
+                file_path= f"AMAZON_saved_trajectories/AMAZON_{shot}_Trial{j+1:02d}.txt"
+                if os.path.exists(file_path):
+                    continue
+
                 print("---->> shot : ", shot)
 
-                # # shot_results.append(ate_score)
+                traj_ref = get_ref_traj(shot_path)
+                print("traj_ref ", traj_ref.shape)
+
+                torch.cuda.empty_cache()
+                traj_est, tstamps = run(shot_path, config, net)
+                print("traj_est ", traj_est.shape)
+
+                torch.cuda.empty_cache()
+                # ate_score = ate(traj_ref, traj_est, tstamps)
+                # print("ate_score  ",ate_score)
+
+                print("------------------------------ ")
+
+                # shot_results.append(ate_score)
                 if plot:
-                    ate_score = ate(traj_ref, traj_est, tstamps)
 
                     Path("AMAZON_trajectory_plots").mkdir(exist_ok=True)
                     plot_trajectory(
@@ -295,11 +326,18 @@ if __name__ == '__main__':
 
     torch.manual_seed(1234)
 
-    results = evaluate(cfg,
-                       args.weights,
-                       split=args.split,
-                       trials=args.trials,
-                       plot=args.plot,
-                       save=args.save_trajectory)
-    for k in results:
-        print(k, results[k])
+    evaluate(cfg,
+             args.weights,
+             split=args.split,
+             trials=args.trials,
+             plot=args.plot,
+             save=args.save_trajectory)
+
+    # results = evaluate(cfg,
+    #                    args.weights,
+    #                    split=args.split,
+    #                    trials=args.trials,
+    #                    plot=args.plot,
+    #                    save=args.save_trajectory)
+    # for k in results:
+    #     print(k, results[k])
