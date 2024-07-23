@@ -256,8 +256,8 @@ class DPVO:
         self.traj = {}
         for i in range(self.n):
             self.traj[self.tstamps_[i].item()] = self.poses_[i]
-        print("self.traj ", len(self.traj))
-        print("self.counter ", self.counter)
+        #print("self.traj ", len(self.traj))
+        #print("self.counter ", self.counter)
 
         poses = [self.get_pose(t) for t in range(self.counter)]
         poses = lietorch.stack(poses, dim=0)
