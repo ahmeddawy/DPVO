@@ -92,7 +92,7 @@ def evaluate(config, net, split="validation", trials=1, plot=False, save=False):
         os.mkdir("TartanAirResults")
 
     scenes = test_split if split=="test" else val_split
-    print("scenes ",scenes)
+    # print("scenes ",scenes)
     results = {}
     all_results = []
     for i, scene in enumerate(scenes):
@@ -137,7 +137,7 @@ def evaluate(config, net, split="validation", trials=1, plot=False, save=False):
             #     save_trajectory_tum_format((traj_est, tstamps), f"saved_trajectories/TartanAir_{scene_name}_Trial{j+1:02d}.txt")
             #     save_trajectory_tum_format((traj_ref,tstamps), f"saved_trajectories/TartanAir_ref_{scene_name}_Trial{j+1:02d}.txt")
 
-        print(scene, sorted(results[scene]))
+        # print(scene, sorted(results[scene]))
 
     results_dict = dict([("Tartan/{}".format(k), np.median(v)) for (k, v) in results.items()])
 
