@@ -59,10 +59,10 @@ class RGBDDataset(data.Dataset):
     def _build_dataset_index(self):
         self.dataset_index = []
         samples_counter = 0
+        validation_counter = 0
         for scene in self.scene_info:
-            parts = scene.split('/')
-            scene_ = '/'.join(parts[1:])
-            if not self.__class__.is_test_scene(scene_):
+            # print("in loop scene" ,scene) 
+            if not self.__class__.is_test_scene(scene):
                 samples_counter = samples_counter + 1
                 graph = self.scene_info[scene]['graph']
                 for i in graph:
@@ -70,7 +70,9 @@ class RGBDDataset(data.Dataset):
                         self.dataset_index.append((scene, i))
             else:
                 print("Reserving {} for validation".format(scene))
+                validation_counter = validation_counter +1
         print("Total number of Training Samples: ", samples_counter)
+        print("Total number of Validation  Samples: ", validation_counter)
 
     @staticmethod
     def image_read(image_file):

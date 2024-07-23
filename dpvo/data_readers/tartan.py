@@ -77,16 +77,17 @@ class TartanAir(RGBDDataset):
         self.n_frames = 2
         super(TartanAir, self).__init__(name='TartanAir', **kwargs)
 
-    # def is_test_scene(scene):
-
-    #     return any(x in scene for x in test_split)
     @staticmethod
     def is_test_scene(scene):
-        def modify_path(path):
-            parts = path.split('/')
-            return '/'.join(parts[1:])
 
-        return any(modify_path(x) in scene for x in test_split)
+         return any(x in scene for x in test_split)
+    #@staticmethod
+    #def is_test_scene(scene):
+    #    def modify_path(path):
+    #        parts = path.split('/')
+    #        return '/'.join(parts[1:])
+
+    #    return any(modify_path(x) in scene for x in test_split)
 
     @staticmethod
     def is_scene_found(scene):
