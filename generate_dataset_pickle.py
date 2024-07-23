@@ -6,11 +6,10 @@ import os.path as osp
 from dpvo.data_readers.tartan import TartanAir
 
 dataset = TartanAir(
-    datapath="/home/oem/Rembrand/moving_camera/datasets/TartanAir")
+    datapath="/mnt/data/visual_slam/tartanair/")
 scene_info = dataset._build_dataset()
-print("scene_info ",type(scene_info))
 
-with open('my.pickle', 'wb') as handle:
+with open('tartanair.pickle', 'wb') as handle:
     pickle.dump(scene_info, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-scene_info__ = pickle.load(open('my.pickle', 'rb'))
+scene_info__ = pickle.load(open('tartanair.pickle', 'rb'))
