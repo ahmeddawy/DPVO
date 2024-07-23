@@ -2,6 +2,8 @@ import cv2
 import os
 import argparse
 import numpy as np
+import neptune
+
 from collections import OrderedDict
 
 import matplotlib.pyplot as plt
@@ -47,6 +49,23 @@ def train(args):
     """ main training loop """
 
     # legacy ddp code
+
+    run = neptune.init_run(
+        project="Rembrand/mc-dpvo",
+        api_token=
+        "eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJmNzA0MGVmZC0zM2VjLTQwYjAtYWNhNC0wYTg1OTJmMGRkZjcifQ==",
+    )
+
+    params = {
+        "experiment_name": args.name,
+        "learning_rate": args.lr,
+        "optimizer": "AdamW",
+        "scheduler": "OneCycleLR",
+        "training steps": args.steps,
+    }
+
+    run["parameters"] = params
+
     rank = 0
 
     db = dataset_factory(['tartan'],
@@ -131,8 +150,12 @@ def train(args):
                 ro = e1[..., 3:6].norm(dim=-1)
 
                 loss += args.flow_weight * e.mean()
+                run["train/loss"].append(loss)
+                run["train/flow_loss"].append(e.mean())
+
                 if not so and i >= 2:
                     loss += args.pose_weight * (tr.mean() + ro.mean())
+                    run["train/pose_loss"].append(tr.mean() + ro.mean())
 
             # kl is 0 (not longer used)
             loss += kl
@@ -159,15 +182,17 @@ def train(args):
             if rank == 0:
                 logger.push(metrics)
 
-            if total_steps % 10 == 0:
+            if total_steps % 10000 == 0:
                 torch.cuda.empty_cache()
 
                 if rank == 0:
-                    PATH = '/DPVO/training_checkpoints/%s_%06d.pth' % (args.name, total_steps)
+                    PATH = '/DPVO/training_checkpoints/%s_%06d.pth' % (
+                        args.name, total_steps)
                     torch.save(net.state_dict(), PATH)
 
                 validation_results = validate(None, net)
-                print(validation_results)
+                run["validation_results"].append(validation_results)
+
                 if rank == 0:
                     logger.write_dict(validation_results)
 
