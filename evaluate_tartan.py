@@ -107,7 +107,7 @@ def evaluate(config, net, split="validation", trials=1, plot=False, save=False):
             
             elif split == 'validation':
                 scene_path = os.path.join("/mnt/data/visual_slam/tartanair/", scene, "image_left")
-                traj_ref = osp.join("datasets/TartanAir", scene, "pose_left.txt")
+                traj_ref = osp.join("/mnt/data/visual_slam/tartanair/", scene, "pose_left.txt")
 
             # run the slam system
             traj_est, tstamps = run(scene_path, config, net)
