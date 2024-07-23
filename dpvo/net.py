@@ -326,13 +326,17 @@ class VONet(nn.Module):
 
         images = 2 * (images / 255.0) - 0.5
         intrinsics = intrinsics / 4.0
-        disps = disps[:, :, 1::4, 1::4].float()
+        disps = disps[:, :, 1::4, 1::4].float() # Downsample
 
+        # 1- feature map of the frame Size(1, 1, 128, 132, 240)
+        # 2- corresponding patches of the feature map Size([1, 96, 128, 3, 3])
+        # 3- corresponding patches of the context map Size([1, 96, 384, 1, 1])
+        # 4- patches of the image centered around coords with added disparity Size([1, 96, 3, 3, 3])
         fmap, gmap, imap, patches, ix = self.patchify(images, disps=disps)
 
-        corr_fn = CorrBlock(fmap, gmap)
+        corr_fn = CorrBlock(fmap, gmap) 
 
-        b, N, c, h, w = fmap.shape
+        b, N, c, h, w = fmap.shape # Size(1, 1, 128, 132, 240)
         p = self.P
 
         patches_gt = patches.clone()

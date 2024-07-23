@@ -50,11 +50,10 @@ class RGBDDataset(data.Dataset):
             os.mkdir(osp.join(cur_path, 'cache'))
 
 
-        # self.scene_info = \
-        #     pickle.load(open('datasets/TartanAir.pickle', 'rb'))[0]
-        # # self.scene_info =  open('/mnt/data/visual_slam/tartanair/scenes.txt', 'r')
+        self.scene_info = \
+            pickle.load(open('datasets/TartanAir.pickle', 'rb'))[0]
+        self._build_dataset_index()
 
-        # self._build_dataset_index()
 
     def _build_dataset_index(self):
         self.dataset_index = []
@@ -82,18 +81,28 @@ class RGBDDataset(data.Dataset):
 
     def build_frame_graph(self, poses, depths, intrinsics, f=16, max_flow=256):
         """ compute optical flow distance between all pairs of frames """
-
+        # f is Downsampling factor, default is 16
         def read_disp(fn):
-            depth = self.__class__.depth_read(fn)[f // 2::f, f // 2::f]
+            depth = self.__class__.depth_read(fn)[f // 2::f, f // 2::f] # Downsample the depth map
             depth[depth < 0.01] = np.mean(depth)
-            return 1.0 / depth
+            return 1.0 / depth # Return the disparity
 
         poses = np.array(poses)
-        intrinsics = np.array(intrinsics) / f
+        intrinsics = np.array(intrinsics) / f # Divide the intrinsics by the Downsample factor
 
-        disps = np.stack(list(map(read_disp, depths)), 0)
-        d = f * compute_distance_matrix_flow(poses, disps, intrinsics)
+        # For each depth map file in depths apply the read_disp function.
+        # Convert the map object into a list of loaded-downsampled depth maps.
+        # Stack the downsampled depth maps in a numpy array
+        disps = np.stack(list(map(read_disp, depths)), 0) # (Num of Depth maps, W_downsampled , H_downsampled)
+        
+        d = f * compute_distance_matrix_flow(poses, disps, intrinsics) # the oprical flow matrix is scaled by f, perhaps because it was calculated using disparity (1/depth)
 
+        
+        '''For each frame i, find the indices j of frames with flow magnitude less than max_flow.
+           Add these indices and their corresponding flow magnitudes to the graph.
+           
+           frame_i -> (frame_j , optical_flow_magnitude) 
+           '''
         graph = {}
         for i in range(d.shape[0]):
             j, = np.where(d[i] < max_flow)
@@ -105,8 +114,10 @@ class RGBDDataset(data.Dataset):
         """ return training video """
 
         index = index % len(self.dataset_index)
+        # Retrieve the scene_id and frame index ix corresponding to the provided index.
         scene_id, ix = self.dataset_index[index]
-
+        
+        # Retrieve the graph, images, depths, poses, and intrinsics for the specified scene.
         frame_graph = self.scene_info[scene_id]['graph']
         images_list = self.scene_info[scene_id]['images']
         depths_list = self.scene_info[scene_id]['depths']
@@ -120,13 +131,13 @@ class RGBDDataset(data.Dataset):
 
         inds = [ix]
 
-        while len(inds) < self.n_frames:
+        while len(inds) < self.n_frames:  #  self.n_frames=4
             # get other frames within flow threshold
 
-            if self.sample:
+            if self.sample:   # True
                 k = (frame_graph[ix][1] > self.fmin) & (frame_graph[ix][1]
                                                         < self.fmax)
-                frames = frame_graph[ix][0][k]
+                frames = frame_graph[ix][0][k] # retrieves the indices of the frames that have flow distances from frame ix.
 
                 # prefer frames forward in time
                 if np.count_nonzero(frames[frames > ix]):
@@ -141,7 +152,8 @@ class RGBDDataset(data.Dataset):
             else:
                 i = frame_graph[ix][0].copy()
                 g = frame_graph[ix][1].copy()
-
+                
+                # s=1 , d is randomly sampled between (min flow, max flow)
                 g[g > d] = -1
                 if s > 0:
                     g[i <= ix] = -1

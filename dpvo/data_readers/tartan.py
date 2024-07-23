@@ -68,6 +68,7 @@ exist_scenes = [
 
 
 class TartanAir(RGBDDataset):
+    ''' inherits from RGBDDataset '''
 
     # scale depths to balance rot & trans
     DEPTH_SCALE = 5.0
@@ -77,9 +78,6 @@ class TartanAir(RGBDDataset):
         self.n_frames = 2
         super(TartanAir, self).__init__(name='TartanAir', **kwargs)
 
-    # def is_test_scene(scene):
-
-    #     return any(x in scene for x in test_split)
     @staticmethod
     def is_test_scene(scene):
         def modify_path(path):
@@ -94,6 +92,8 @@ class TartanAir(RGBDDataset):
         return any(x in scene for x in exist_scenes)
 
     def _build_dataset(self):
+        ''' Construct the dataset by loading images, depths, poses, and intrinsics, and creating a frame co-visible graph'''
+        
         from tqdm import tqdm
         print("Building TartanAir dataset")
 
@@ -101,15 +101,21 @@ class TartanAir(RGBDDataset):
         scenes = glob.glob(osp.join(self.root, '*/*/*/'))
         print("scenes ",scenes)
         for scene in tqdm(sorted(scenes)):
-            images = sorted(glob.glob(osp.join(scene, 'image_left/*.png')))
-            depths = sorted(glob.glob(osp.join(scene, 'depth_left/*.npy')))
+            images = sorted(glob.glob(osp.join(scene, 'image_left/*.png'))) # all image files for each scene
+            depths = sorted(glob.glob(osp.join(scene, 'depth_left/*.npy'))) # all depth files for each scene
 
+            # Number of images must equal Number of depth maps in order to add the scene
             if len(images) != len(depths):
                 continue
-
+            
+            # Load poses of the scene 
             poses = np.loadtxt(osp.join(scene, 'pose_left.txt'), delimiter=' ')
+            # Reorder the columns of the poses array -> (x,y,z,q_x, q_y, q_z, q_w)
             poses = poses[:, [1, 2, 0, 4, 5, 3, 6]]
+            # Scale the first three columns of the poses array by dividing them by TartanAir.DEPTH_SCALE.
             poses[:, :3] /= TartanAir.DEPTH_SCALE
+
+            # list of intrinsic camera parameters for each image in the dataset
             intrinsics = [TartanAir.calib_read()] * len(images)
 
             # graph of co-visible frames based on flow
