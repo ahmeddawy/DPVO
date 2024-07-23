@@ -106,7 +106,7 @@ def evaluate(config, net, split="validation", trials=1, plot=False, save=False):
                 traj_ref = osp.join("datasets/mono", "mono_gt", scene + ".txt")
             
             elif split == 'validation':
-                scene_path = os.path.join("datasets/TartanAir", scene, "image_left")
+                scene_path = os.path.join("/mnt/data/visual_slam/tartanair/", scene, "image_left")
                 traj_ref = osp.join("datasets/TartanAir", scene, "pose_left.txt")
 
             # run the slam system

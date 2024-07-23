@@ -95,7 +95,7 @@ if __name__ == '__main__':
 
     torch.manual_seed(1234)
 
-    euroc_scenes = ["MH_01_easy", "MH_02_easy","MH_03_medium","MH_04_difficult",'MH_05_difficult','V1_01_easy','V1_02_medium','V1_03_difficult','V2_01_easy']
+    euroc_scenes = ["MH_01_easy"]
 
     results = {}
     for scene in euroc_scenes:

@@ -35,10 +35,10 @@ def kabsch_umeyama(A, B):
     EA = torch.mean(A, axis=0)
     EB = torch.mean(B, axis=0)
     VarA = torch.mean((A - EA).norm(dim=1)**2)
-
+    torch.cuda.empty_cache()
     H = ((A - EA).T @ (B - EB)) / n
     U, D, VT = torch.svd(H)
-
+    torch.cuda.empty_cache()
     c = VarA / torch.trace(torch.diag(D))
     return c
 
@@ -52,7 +52,7 @@ def train(args):
     db = dataset_factory(['tartan'],
                          datapath="/mnt/data/visual_slam/tartanair",
                          n_frames=args.n_frames)
-    train_loader = DataLoader(db, batch_size=1, shuffle=True, num_workers=4)
+    train_loader = DataLoader(db, batch_size=1, shuffle=True, num_workers=8)
 
     net = VONet()
     net.train()
@@ -163,7 +163,7 @@ def train(args):
                 torch.cuda.empty_cache()
 
                 if rank == 0:
-                    PATH = 'checkpoints/%s_%06d.pth' % (args.name, total_steps)
+                    PATH = '/DPVO/training_checkpoints/%s_%06d.pth' % (args.name, total_steps)
                     torch.save(net.state_dict(), PATH)
 
                 validation_results = validate(None, net)
