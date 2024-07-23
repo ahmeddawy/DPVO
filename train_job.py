@@ -159,7 +159,7 @@ def train(args):
             if rank == 0:
                 logger.push(metrics)
 
-            if total_steps % 10000 == 0:
+            if total_steps % 10 == 0:
                 torch.cuda.empty_cache()
 
                 if rank == 0:
@@ -167,6 +167,7 @@ def train(args):
                     torch.save(net.state_dict(), PATH)
 
                 validation_results = validate(None, net)
+                print(validation_results)
                 if rank == 0:
                     logger.write_dict(validation_results)
 

@@ -29,7 +29,7 @@ def show_image(image, t=0):
 
 def video_iterator(imagedir, ext=".png", preload=True):
     imfiles = glob.glob(osp.join(imagedir, "*{}".format(ext)))
-    print("imfiles ",imagedir)
+    
 
     data_list = []
     for imfile in sorted(imfiles)[::STRIDE]:
