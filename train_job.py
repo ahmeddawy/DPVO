@@ -90,7 +90,7 @@ def train(args):
 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,
                                                     args.lr,
-                                                    args.steps,
+                                                    args.steps*len(train_loader),
                                                     pct_start=0.01,
                                                     cycle_momentum=False,
                                                     anneal_strategy='linear')
@@ -100,7 +100,8 @@ def train(args):
 
     total_steps = 0
 
-    while total_steps < args.steps:
+    while 1:
+        
         for data_blob in train_loader:
             images, poses, disps, intrinsics = [
                 x.cuda().float() for x in data_blob
@@ -120,6 +121,8 @@ def train(args):
                        structure_only=so)
 
             loss = 0.0
+            flow_loss = 0.0
+            pose_loss = 0.0
             for i, (v, x, y, P1, P2, kl) in enumerate(traj):
                 e = (x - y).norm(dim=-1)
                 e = e.reshape(-1, 9)[(v > 0.5).reshape(-1)].min(dim=-1).values
@@ -150,15 +153,21 @@ def train(args):
                 ro = e1[..., 3:6].norm(dim=-1)
 
                 loss += args.flow_weight * e.mean()
-                run["train/loss"].append(loss)
-                run["train/flow_loss"].append(e.mean())
+                flow_loss += e.mean()
+                #run["train/loss"].append(loss)
+                #run["train/flow_loss"].append(e.mean())
 
                 if not so and i >= 2:
                     loss += args.pose_weight * (tr.mean() + ro.mean())
-                    run["train/pose_loss"].append(tr.mean() + ro.mean())
+                    pose_loss +=  (tr.mean() + ro.mean())
+                    #run["train/pose_loss"].append(tr.mean() + ro.mean())
 
             # kl is 0 (not longer used)
             loss += kl
+            run["train/loss"].append(loss)
+            run["train/flow_loss"].append(flow_loss)
+            run["train/pose_loss"].append(pose_loss)
+
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(net.parameters(), args.clip)
@@ -182,7 +191,7 @@ def train(args):
             if rank == 0:
                 logger.push(metrics)
 
-            if total_steps % 100 == 0:
+            if total_steps % 10000 == 0:
                 torch.cuda.empty_cache()
 
                 if rank == 0:
@@ -198,6 +207,11 @@ def train(args):
 
                 torch.cuda.empty_cache()
                 net.train()
+
+            if  total_steps > args.steps :
+                break
+
+        break
     run.stop()
 
 if __name__ == '__main__':

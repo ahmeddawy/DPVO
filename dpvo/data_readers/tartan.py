@@ -134,10 +134,11 @@ class TartanAir(RGBDDataset):
     @staticmethod
     def image_read(image_file):
         return cv2.imread(image_file)
-
+        
     @staticmethod
     def depth_read(depth_file):
-        depth = np.load(depth_file) / TartanAir.DEPTH_SCALE
-        depth[depth == np.nan] = 1.0
-        depth[depth == np.inf] = 1.0
-        return depth
+       depth = np.load(depth_file) / TartanAir.DEPTH_SCALE
+       depth[depth == np.nan] = 1.0
+       depth[depth == np.inf] = 1.0
+       return depth
+       
