@@ -245,11 +245,23 @@ class DPVO:
         return self.gmap_.view(1, self.mem * self.M, 128, 3, 3)
 
     def get_pose(self, t):
-        if t in self.traj:
-            return SE3(self.traj[t])
+        stack = [t]
+        result = {}
 
-        t0, dP = self.delta[t]
-        return dP * self.get_pose(t0)
+        while stack:
+            current = stack[-1]
+            if current in self.traj:
+                result[current] = SE3(self.traj[current])
+                stack.pop()
+            else:
+                t0, dP = self.delta[current]
+                if t0 in result:
+                    result[current] = dP * result[t0]
+                    stack.pop()
+                else:
+                    stack.append(t0)
+
+        return result[t]
 
     def terminate(self):
         """ interpolate missing poses """
