@@ -100,13 +100,14 @@ def train(args):
 
     total_steps = 0
 
+    accumulation_steps = 4
     while 1:
         
         for data_blob in train_loader:
             images, poses, disps, intrinsics = [
                 x.cuda().float() for x in data_blob
             ]
-            optimizer.zero_grad()
+            # optimizer.zero_grad()
 
             # fix poses to gt for first 1k steps
             so = total_steps < 1000 and args.ckpt is None
@@ -117,7 +118,7 @@ def train(args):
                        disps,
                        intrinsics,
                        M=1024,
-                       STEPS=8,
+                       STEPS=16,
                        structure_only=so)
 
             loss = 0.0
@@ -169,10 +170,12 @@ def train(args):
             run["train/pose_loss"].append(pose_loss)
 
             loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(net.parameters(), args.clip)
-            optimizer.step()
-            scheduler.step()
+            
+            if (total_steps +1 ) %  accumulation_steps == 0:
+                torch.nn.utils.clip_grad_norm_(net.parameters(), args.clip)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
 
             total_steps += 1
 
