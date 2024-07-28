@@ -744,7 +744,7 @@ class DPVO:
 
         self.counter += 1
         if self.n > 0 and not self.is_initialized:
-            if self.motion_probe() < 2.0:
+            if self.motion_probe() < 0.0:
                 self.delta[self.counter - 1] = (self.counter - 2, Id[0])
                 return
 
