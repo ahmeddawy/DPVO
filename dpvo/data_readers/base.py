@@ -184,7 +184,8 @@ class RGBDDataset(data.Dataset):
                 self.aug(images, poses, disps, intrinsics)
 
         # normalize depth
-        s = .7 * torch.quantile(disps, .98)
+        # s = .7 * torch.quantile(disps, .98)
+        s = .7 * np.quantile(disps, .98)
         disps = disps / s
         poses[..., :3] *= s
 
