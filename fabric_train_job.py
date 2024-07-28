@@ -17,7 +17,9 @@ from dpvo.logger import Logger
 import torch.nn.functional as F
 
 from dpvo.net import VONet
-from evaluate_tartan import evaluate as validate
+from dpvo.data_readers.tartan import test_split
+from dpvo.config import cfg
+from evaluate_tartan import run, ate, STRIDE
 from lightning.fabric import Fabric
 
 def show_image(image):
@@ -58,7 +60,7 @@ def train_step(fabric, net, optimizer, scheduler, data_blob, so):
                 disps,
                 intrinsics,
                 M=1024,
-                STEPS=8,
+                STEPS=14,
                 structure_only=so)
 
     loss = 0.0
@@ -104,7 +106,7 @@ def train_step(fabric, net, optimizer, scheduler, data_blob, so):
     loss += kl
 
     fabric.backward(loss)
-    fabric.clip_gradients(net, optimizer, max_norm=0.5)
+    fabric.clip_gradients(net, optimizer, max_norm=args.clip)
 
     optimizer.step()
     scheduler.step()
@@ -121,9 +123,6 @@ def train_step(fabric, net, optimizer, scheduler, data_blob, so):
         "t2": (tr < .01).float().mean().item(),
     }
     return loss, flow_loss, pose_loss, metrics
-
-def val_step(fabric, net, optimizer,):
-    pass
 
 def train(args):
     """ main training loop """
@@ -151,6 +150,11 @@ def train(args):
                          n_frames=args.n_frames)
     train_loader = DataLoader(db, batch_size=1, shuffle=True, num_workers=8)
 
+    val_dataset = [
+        [os.path.join("/mnt/data/visual_slam/tartanair/", scene, "image_left") for scene in test_split],
+        [os.path.join("/mnt/data/visual_slam/tartanair/", scene, "pose_left.txt") for scene in test_split]
+        ]
+    validation_loader = DataLoader(val_dataset)
     net = VONet()
 
     if args.ckpt is not None:
@@ -172,7 +176,7 @@ def train(args):
                                                 anneal_strategy='linear')
     
     net, optimizer = fabric.setup(net, optimizer)
-    train_loader = fabric.setup_dataloaders(train_loader)
+    train_loader, validation_loader = fabric.setup_dataloaders(train_loader, validation_loader)
     if fabric.global_rank == 0:
         logger = Logger(args.name, scheduler)
 
@@ -210,14 +214,40 @@ def train(args):
                         args.name, total_steps)
                     torch.save(net.state_dict(), PATH)
                 fabric.barrier()
+
+                if config is None:
+                    config = cfg
+                    config.merge_from_file("config/default.yaml")
                 
-                # validation_results = validate(None, net)
-                # run["validation_results"].append(validation_results)
+                results = {}
+                for batch in validation_loader:
+                    scene, traj = batch
+                    traj_est, tstamps = run(scene, config, net)
 
-                # if fabric.global_rank == 0:
-                #     logger.write_dict(validation_results)
+                    PERM = [1, 2, 0, 4, 5, 3, 6] # ned -> xyz
+                    traj_ref = np.loadtxt(traj_ref, delimiter=" ")[::STRIDE, PERM]
 
-                # torch.cuda.empty_cache()
+                    ate_score = ate(traj_ref, traj_est, tstamps)
+                    results[scene].append(ate_score)
+
+                # gather everything in rank 0
+                results = fabric.all_gather(results)
+
+                if fabric.global_rank == 0:
+                    validation_results = dict([("Tartan/{}".format(k), np.median(v)) for (k, v) in results.items()])
+                    
+                    xs = []
+                    ates = []
+                    for scene in results:
+                        x = np.median(results[scene])
+                        ates.append(results[scene])
+                        xs.append(x)
+
+                    validation_results["AUC"] = np.maximum(1 - np.array(ates), 0).mean()
+                    validation_results["AVG"] = np.mean(xs)
+                    logger.write_dict(validation_results)
+                fabric.barrier()
+
                 net.train()
 
             if  total_steps > args.steps :
