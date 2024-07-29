@@ -22,6 +22,7 @@ from dpvo.config import cfg
 from evaluate_tartan import run, ate, STRIDE
 from lightning.fabric import Fabric
 from lightning.fabric.loggers import Logger as FabricLogger
+from lightning.fabric.utilities.rank_zero import rank_zero_only, rank_zero_warn
 
 def get_device_config():
     gpu_type = torch.cuda.get_device_name()
@@ -204,7 +205,7 @@ def train(args):
     while 1:
         for data_blob in train_loader:
             # fix poses to gt for first 1k steps
-            so = total_steps < 1000 and args.ckpt is None
+            so = total_steps < 250 and args.ckpt is None
 
             loss, flow_loss, pose_loss, metrics = \
                 train_step(fabric, net, optimizer, scheduler, data_blob, so)
@@ -221,8 +222,8 @@ def train(args):
             total_steps += 1
 
 
-            if total_steps % 10000 == 0:
-                # torch.cuda.empty_cache()
+            if total_steps % 2500 == 0:
+                torch.cuda.empty_cache()
 
                 net.eval()
 
@@ -265,34 +266,44 @@ def train(args):
                     logger.write_dict(validation_results)
                 fabric.barrier()
 
+                torch.cuda.empty_cache()
                 net.train()
 
-            if  total_steps > args.steps :
+            if  (total_steps * device_count) > args.steps :
                 break
 
         break
 
 class NeptuneLogger(FabricLogger):
     def __init__(self, project, api_token, strategy, gpu_name, device_count):
+        self.create_run(project, api_token, strategy, gpu_name, device_count)
+
+    @rank_zero_only
+    def create_run(self, project, api_token, strategy, gpu_name, device_count):
         self.run = neptune.init_run(
             project=project,
             api_token=api_token,
             tags=["fabric_" + strategy , str(device_count) + "x-" + gpu_name]
         )
-        
+    
+    @rank_zero_only
     def log_hyperparams(self, params, *args, **kwargs):
         self.run["parameters"] = params
-        
+    
+    @rank_zero_only
     def name(self):
         return "neptune"
     
+    @rank_zero_only
     def version(self):
         return 1
     
+    @rank_zero_only
     def log_metrics(self, metrics):
         for k in metrics:
             self.run[k].append(metrics[k]) 
     
+    @rank_zero_only
     def finalize(self):
         self.run.stop()
 
