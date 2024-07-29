@@ -173,6 +173,7 @@ def train(args):
         ]
     validation_loader = DataLoader(val_dataset)
     net = VONet()
+    config = None
 
     if args.ckpt is not None:
         state_dict = torch.load(args.ckpt)
