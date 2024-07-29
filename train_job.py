@@ -44,7 +44,6 @@ def kabsch_umeyama(A, B):
     c = VarA / torch.trace(torch.diag(D))
     return c
 
-
 def train(args):
     """ main training loop """
 
@@ -121,6 +120,8 @@ def train(args):
                        STEPS=16,
                        structure_only=so)
 
+
+
             loss = 0.0
             flow_loss = 0.0
             pose_loss = 0.0
@@ -155,13 +156,13 @@ def train(args):
 
                 loss += args.flow_weight * e.mean()
                 flow_loss += e.mean()
-                #run["train/loss"].append(loss)
-                #run["train/flow_loss"].append(e.mean())
+                run["train/loss"].append(loss)
+                run["train/flow_loss"].append(e.mean())
 
                 if not so and i >= 2:
                     loss += args.pose_weight * (tr.mean() + ro.mean())
                     pose_loss +=  (tr.mean() + ro.mean())
-                    #run["train/pose_loss"].append(tr.mean() + ro.mean())
+                    run["train/pose_loss"].append(tr.mean() + ro.mean())
 
             # kl is 0 (not longer used)
             loss += kl
