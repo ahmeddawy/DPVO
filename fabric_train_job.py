@@ -168,9 +168,10 @@ def train(args):
     train_loader = DataLoader(db, batch_size=1, shuffle=True, num_workers=8)
 
     val_dataset = [
-        [os.path.join("/mnt/data/visual_slam/tartanair/", scene, "image_left") for scene in test_split],
-        [os.path.join("/mnt/data/visual_slam/tartanair/", scene, "pose_left.txt") for scene in test_split]
-        ]
+        [os.path.join("/mnt/data/visual_slam/tartanair/", scene, "image_left"), 
+         os.path.join("/mnt/data/visual_slam/tartanair/", scene, "pose_left.txt")] for scene in test_split
+         ]
+        
     validation_loader = DataLoader(val_dataset)
     net = VONet()
     config = None
@@ -241,6 +242,7 @@ def train(args):
                 results = {}
                 for batch in validation_loader:
                     scene, traj_ref = batch
+                    scene, traj_ref= scene[0], traj_ref[0]
                     traj_est, tstamps = run(scene, config, net)
 
                     PERM = [1, 2, 0, 4, 5, 3, 6] # ned -> xyz
@@ -300,7 +302,7 @@ class NeptuneLogger(FabricLogger):
         return 1
     
     @rank_zero_only
-    def log_metrics(self, metrics):
+    def log_metrics(self, metrics, step=None):
         for k in metrics:
             self.run[k].append(metrics[k]) 
     
