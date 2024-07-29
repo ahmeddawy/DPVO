@@ -21,6 +21,18 @@ from dpvo.data_readers.tartan import test_split
 from dpvo.config import cfg
 from evaluate_tartan import run, ate, STRIDE
 from lightning.fabric import Fabric
+from lightning.fabric.loggers import Logger as FabricLogger
+
+def get_device_config():
+    gpu_type = torch.cuda.get_device_name()
+    device_count = torch.cuda.device_count()
+    names = ["V100", "A100", "T4", "L4"]
+    for n in names:
+        if n in gpu_type:
+            gpu_type = n
+            break
+
+    return gpu_type, device_count
 
 def show_image(image):
     image = image.permute(1, 2, 0).cpu().numpy()
@@ -126,24 +138,28 @@ def train_step(fabric, net, optimizer, scheduler, data_blob, so):
 
 def train(args):
     """ main training loop """
-    fabric = Fabric(strategy="ddp", accelerator="cuda")
+
+    distribution_strategy = "DDP"
+    gpu_name, device_count = get_device_config()
+    neptune_logger = NeptuneLogger(project="Rembrand/mc-dpvo",
+                                   api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJkYjc0ZjU1Zi1jYjRmLTRhZjMtOTg2My1jNjcxNjlhNDViNWMifQ==",
+                                   strategy=distribution_strategy,
+                                   gpu_name=gpu_name,
+                                   device_count=device_count)
+    params = {
+        "experiment_name": args.name,
+        "learning_rate": args.lr,
+        "optimizer": "AdamW",
+        "scheduler": "OneCycleLR",
+        "training steps": args.steps,
+    }
+
+    neptune_logger.log_hyperparams(params)
+
+    fabric = Fabric(strategy=distribution_strategy, 
+                    accelerator="cuda",
+                    loggers=neptune_logger)
     fabric.launch()
-
-    # run = neptune.init_run(
-    #     project="Rembrand/mc-dpvo",
-    #     api_token=
-    #     "eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJmNzA0MGVmZC0zM2VjLTQwYjAtYWNhNC0wYTg1OTJmMGRkZjcifQ==",
-    # )
-
-    # params = {
-    #     "experiment_name": args.name,
-    #     "learning_rate": args.lr,
-    #     "optimizer": "AdamW",
-    #     "scheduler": "OneCycleLR",
-    #     "training steps": args.steps,
-    # }
-
-    # run["parameters"] = params
 
     db = dataset_factory(['tartan'],
                          datapath="/mnt/data/visual_slam/tartanair",
@@ -176,7 +192,8 @@ def train(args):
                                                 anneal_strategy='linear')
     
     net, optimizer = fabric.setup(net, optimizer)
-    train_loader, validation_loader = fabric.setup_dataloaders(train_loader, validation_loader)
+    train_loader = fabric.setup_dataloaders(train_loader)
+    validation_loader = fabric.setup_dataloaders(validation_loader, move_to_device=False)
     if fabric.global_rank == 0:
         logger = Logger(args.name, scheduler)
 
@@ -193,10 +210,10 @@ def train(args):
                 train_step(fabric, net, optimizer, scheduler, data_blob, so)
             
             # neptune logging
-            # run["train/loss"].append(loss)
-            # run["train/flow_loss"].append(flow_loss)
-            # run["train/pose_loss"].append(pose_loss)
-            # run["metrics"].append(metrics)
+            fabric.log("train/loss", loss)
+            fabric.log("train/flow_loss", flow_loss)
+            fabric.log("train/pose_loss", pose_loss)
+            fabric.log("metrics", metrics)
 
             # stdout logging
             if fabric.global_rank == 0:
@@ -210,7 +227,7 @@ def train(args):
                 net.eval()
 
                 if fabric.global_rank == 0:
-                    PATH = '/DPVO/training_checkpoints/%s_%06d.pth' % (
+                    PATH = 'training_checkpoints/%s_%06d.pth' % (
                         args.name, total_steps)
                     torch.save(net.state_dict(), PATH)
                 fabric.barrier()
@@ -221,7 +238,7 @@ def train(args):
                 
                 results = {}
                 for batch in validation_loader:
-                    scene, traj = batch
+                    scene, traj_ref = batch
                     traj_est, tstamps = run(scene, config, net)
 
                     PERM = [1, 2, 0, 4, 5, 3, 6] # ned -> xyz
@@ -235,7 +252,6 @@ def train(args):
 
                 if fabric.global_rank == 0:
                     validation_results = dict([("Tartan/{}".format(k), np.median(v)) for (k, v) in results.items()])
-                    
                     xs = []
                     ates = []
                     for scene in results:
@@ -245,6 +261,7 @@ def train(args):
 
                     validation_results["AUC"] = np.maximum(1 - np.array(ates), 0).mean()
                     validation_results["AVG"] = np.mean(xs)
+                    fabric.log("validation_results", validation_results)
                     logger.write_dict(validation_results)
                 fabric.barrier()
 
@@ -254,7 +271,27 @@ def train(args):
                 break
 
         break
-    # run.stop()
+
+class NeptuneLogger(FabricLogger):
+    def __init__(self, project, api_token, strategy, gpu_name, device_count):
+        self.run = neptune.init_run(
+            project=project,
+            api_token=api_token,
+            tags=["fabric_" + strategy , str(device_count) + "x-" + gpu_name]
+        )
+        
+    def log_hyperparams(self, params, *args, **kwargs):
+        self.run["parameters"] = params
+        
+    def name(self):
+        return "neptune"
+    
+    def log_metrics(self, metrics):
+        for k in metrics:
+            self.run[k].append(metrics[k]) 
+    
+    def finalize(self):
+        self.run.stop()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
