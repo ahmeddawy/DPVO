@@ -8,9 +8,6 @@ import os.path as osp
 from ..lietorch import SE3
 from .base import RGBDDataset
 
-# cur_path = osp.dirname(osp.abspath(__file__))
-# test_split = osp.join(cur_path, 'tartan_test.txt')
-# test_split = open(test_split).read().split()
 
 test_split = [
     "abandonedfactory/Easy/P011",
@@ -47,24 +44,6 @@ test_split = [
     "westerndesert/Hard/P007",
 ]
 
-# test_split = [
-#     "abandonedfactory_sample_P001/P001",
-#     "abandonedfactory_night_sample_P002/P002",
-#     "amusement_sample_P008/P008",
-# ]
-
-exist_scenes = [
-    'abandonedfactory/abandonedfactory/Easy/P001',
-    'abandonedfactory_night/abandonedfactory_night/Easy/P002',
-    'amusement/amusement/Easy/P008', 'carwelding/carwelding/Easy/P007',
-    'endofworld/endofworld/Easy/P001', 'gascola/gascola/Easy/P001',
-    'hospital/hospital/Easy/P000', 'japanesealley/japanesealley/Easy/P007',
-    'neighborhood/neighborhood/Easy/P002', 'ocean/ocean/Easy/P006',
-    'office2/office2/Easy/P003', 'seasidetown/seasidetown/Easy/P003',
-    'seasonsforest/seasonsforest/Easy/P002',
-    'seasonsforest_winter/seasonsforest_winter/Easy/P006',
-    'soulcity/soulcity/Easy/P003', 'westerndesert/westerndesert/Easy/P002'
-]
 
 
 class TartanAir(RGBDDataset):
@@ -81,13 +60,7 @@ class TartanAir(RGBDDataset):
     def is_test_scene(scene):
 
          return any(x in scene for x in test_split)
-    #@staticmethod
-    #def is_test_scene(scene):
-    #    def modify_path(path):
-    #        parts = path.split('/')
-    #        return '/'.join(parts[1:])
 
-    #    return any(modify_path(x) in scene for x in test_split)
 
     @staticmethod
     def is_scene_found(scene):
@@ -100,7 +73,6 @@ class TartanAir(RGBDDataset):
 
         scene_info = {}
         scenes = glob.glob(osp.join(self.root, '*/*/'))
-        # print("scenes ",scenes)
         for scene in tqdm(sorted(scenes)):
             images = sorted(glob.glob(osp.join(scene, 'image_left/*.png')))
             depths = sorted(glob.glob(osp.join(scene, 'depth_left/*.npy')))

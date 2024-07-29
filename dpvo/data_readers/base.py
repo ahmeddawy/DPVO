@@ -52,7 +52,6 @@ class RGBDDataset(data.Dataset):
 
         self.scene_info = \
              pickle.load(open('datasets/tartanair.pickle', 'rb'))
-        # # self.scene_info =  open('/mnt/data/visual_slam/tartanair/scenes.txt', 'r')
 
         self._build_dataset_index()
 
@@ -61,7 +60,6 @@ class RGBDDataset(data.Dataset):
         samples_counter = 0
         validation_counter = 0
         for scene in self.scene_info:
-            # print("in loop scene" ,scene) 
             if not self.__class__.is_test_scene(scene):
                 samples_counter = samples_counter + 1
                 graph = self.scene_info[scene]['graph']
