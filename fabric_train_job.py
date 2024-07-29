@@ -286,6 +286,9 @@ class NeptuneLogger(FabricLogger):
     def name(self):
         return "neptune"
     
+    def version(self):
+        return 1
+    
     def log_metrics(self, metrics):
         for k in metrics:
             self.run[k].append(metrics[k]) 
